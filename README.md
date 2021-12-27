@@ -1,2 +1,2 @@
 # SHART
-SHoot Another Ray Tracer?
+SHoot, Another Ray Tracer?
