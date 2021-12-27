@@ -7,6 +7,8 @@ function main()
 
     obj_path = "objs/s3.obj"
     tris = mesh_to_Tri(load(obj_path))
+	centroid = centroidish(tris)
+
     #tris = parse_obj(obj_path)
     @info "$(length(tris)) triangles"
     width = 512
@@ -14,8 +16,8 @@ function main()
     frame_n = 1
 
 	function moving_camera(frame_i, frame_n)
-		camera_pos = V3((4, 0, 0))
-		look_at = V3((0.0, 0.0, 0.2))
+		camera_pos = V3((4.6, 0, 0)) + centroid
+		look_at = centroid
 		up = V3((0.0, 0.0, -1.0))
 		FOV =  45.0 * pi / 180.0
 
@@ -24,7 +26,7 @@ function main()
 
     depth = 4
     dλ = 30
-    ITERS = 4
+    ITERS = 1
 
     skys = Dict("grey" => sky_color, "rezz" => sky_color_rezz)#
     for i = 1:frame_n

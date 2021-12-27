@@ -17,11 +17,18 @@ function get_hit(n_t::Tuple{Int32,T}, r::Ray)::Tuple{Float32,Int32,T} where {T}
 end
 
 function next_hit(rays, n_tris :: Array{Tuple{I, T}}) where {I, T}
-    minimum(get_hit.(n_tris, rays), dims=2, init=(Inf32, typemax(Int32), zero(T)))
+    dest = Array{Tuple{Float32, Int32, T}}(undef, size(rays))
+    for i in 1:length(dest)
+        dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i]), n_tris, init=(Inf32, typemax(Int32), zero(T)))
+    end
+
+    dest
 end
 
 function next_hit!(dest, rays, n_tris:: Array{Tuple{I, T}}) where {I, T}
-    dest .= minimum(get_hit.(n_tris, rays), dims=2, init=(Inf32, typemax(Int32), zero(T)))
+    for i in 1:length(dest)
+        dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i]), n_tris, init=(Inf32, typemax(Int32), zero(T)))
+    end
     return nothing
 end
 

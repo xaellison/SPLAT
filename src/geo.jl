@@ -212,20 +212,20 @@ function model_box(vertices)
     return (min_x, max_x, min_y, max_y, min_z, max_z)
 end
 
-function model_box(tris::Array{STri})
-    min_x = minimum(map(t -> minimum(v -> v[1], t[2:4]), tris))
-    min_y = minimum(map(t -> minimum(v -> v[2], t[2:4]), tris))
-    min_z = minimum(map(t -> minimum(v -> v[3], t[2:4]), tris))
-    max_x = maximum(map(t -> maximum(v -> v[1], t[2:4]), tris))
-    max_y = maximum(map(t -> maximum(v -> v[2], t[2:4]), tris))
-    max_z = maximum(map(t -> maximum(v -> v[3], t[2:4]), tris))
+function model_box(tris::Array{T}) where {T <: Union{Tri, STri}}
+    min_x = minimum(map(t -> minimum(map(v -> v[1], t[2:4])), tris))
+    min_y = minimum(map(t -> minimum(map(v -> v[2], t[2:4])), tris))
+    min_z = minimum(map(t -> minimum(map(v -> v[3], t[2:4])), tris))
+    max_x = maximum(map(t -> maximum(map(v -> v[1], t[2:4])), tris))
+    max_y = maximum(map(t -> maximum(map(v -> v[2], t[2:4])), tris))
+    max_z = maximum(map(t -> maximum(map(v -> v[3], t[2:4])), tris))
     return (min_x, max_x, min_y, max_y, min_z, max_z)
 end
 
-function centroidish(tris)
+function centroidish(tris) :: V3
     v = model_box(tris)
-    lo = V3(v[1:2:end])
-    hi = V3(v[2:2:end])
+    lo = V3(v[1:2:end]...)
+    hi = V3(v[2:2:end]...)
     return (lo + hi) .* 0.5f0
 end
 
