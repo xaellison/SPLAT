@@ -1,4 +1,4 @@
-glass(λ :: Float32) :: Float32 = begin
+glass(λ) = begin
 							       λ1 = 400.0f0
 								   λ2 = 700.0f0
 								   n1 = 1.5f0

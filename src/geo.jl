@@ -27,7 +27,9 @@ struct Cam
     FOV_half_sin::Float32
 end
 
-struct Ray
+abstract type AbstractRay end
+
+struct Ray <: AbstractRay
     pos::V3
     dir::V3
     polarization::V3
@@ -37,14 +39,29 @@ struct Ray
     λ::Float32
 end
 
+struct FastRay <: AbstractRay
+    pos::V3
+    dir::V3
+    in_medium::Bool
+    ignore_tri::Int
+    dest::Int
+    λ::Float32
+end
+
 Base.zero(::V3) = V3(0.0f0, 0.0f0, 0.0f0)
 Base.typemax(::Ray) = Ray(zero(V3), zero(V3), zero(V3), false, -1, -1, 0.0f0)
+Base.typemax(::FastRay) = Ray(zero(V3), zero(V3), false, -1, -1, 0.0f0)
 Base.typemax(::STri) =
     STri(zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3))
 Base.typemax(::Pair{Ray,STri}) = Pair(typemax(Ray), typemax(STri))
+Base.typemax(::Pair{FastRay,STri}) = Pair(typemax(Ray), typemax(STri))
 
 
 function isless(a::Ray, b::Ray)
+    return isless(a.dest, b.dest)
+end
+
+function isless(a::FastRay, b::FastRay)
     return isless(a.dest, b.dest)
 end
 
@@ -52,11 +69,23 @@ function zero(::Type{Ray})
     Ray(zero(V3), zero(V3), zero(V3), false, 0, typemax(Int), -1.0f0)
 end
 
+function zero(::Type{FastRay})
+    Ray(zero(V3), zero(V3), false, 0, typemax(Int), -1.0f0)
+end
+
 function one(::Type{Ray})
     Ray(zero(V3), zero(V3), zero(V3), true, 0, typemax(Int), -1.0f0)
 end
 
+function one(::Type{FastRay})
+    Ray(zero(V3), zero(V3), true, 0, typemax(Int), -1.0f0)
+end
+
 function typemax(::Type{Tuple{Float32,Ray}})
+    return (Inf32, zero(Ray))
+end
+
+function typemax(::Type{Tuple{Float32,FastRay}})
     return (Inf32, zero(Ray))
 end
 
@@ -326,9 +355,7 @@ end
 function reflectance(v::V3, normal::V3, n1, n2)
     # https://en.wikipedia.org/wiki/Schlick%27s_approximation
     # fascinatingly, schlick gives non-zero reflectance if the media have same n
-    # so we resort to using one of the fresnel's arbitrarily
-    #https://en.wikipedia.org/wiki/Fresnel_equations
-    # Additionally, we use the average of s and p polarizations
+    # so we resort to using the average of s and p polarizations
     # https://en.wikipedia.org/wiki/Schlick%27s_approximation
     n = normalize(normal)
     if dot(n, v) < 0

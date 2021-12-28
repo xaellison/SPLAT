@@ -5,7 +5,7 @@ using Makie
 using ProgressMeter
 using Serialization
 
-function get_hit(n_t::Tuple{Int32,T}, r::Ray)::Tuple{Float32,Int32,T} where {T}
+function get_hit(n_t::Tuple{Int32,T}, r::AbstractRay)::Tuple{Float32,Int32,T} where {T}
     n, t = n_t
     d = distance_to_plane(r.pos, r.dir, t[2], t[1])
     p = r.pos + r.dir * d
@@ -18,7 +18,7 @@ end
 
 function next_hit(rays, n_tris :: Array{Tuple{I, T}}) where {I, T}
     dest = Array{Tuple{Float32, Int32, T}}(undef, size(rays))
-    for i in 1:length(dest)
+    @simd for i in 1:length(dest)
         dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i]), n_tris, init=(Inf32, typemax(Int32), zero(T)))
     end
 
@@ -26,7 +26,7 @@ function next_hit(rays, n_tris :: Array{Tuple{I, T}}) where {I, T}
 end
 
 function next_hit!(dest, rays, n_tris:: Array{Tuple{I, T}}) where {I, T}
-    for i in 1:length(dest)
+    @simd for i in 1:length(dest)
         dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i]), n_tris, init=(Inf32, typemax(Int32), zero(T)))
     end
     return nothing
@@ -38,6 +38,7 @@ function evolve_ray(r::Ray, d_n_t, rndm)::Ray
         return r
     end
     p = r.pos + r.dir * d
+
     n1, n2 = 1.0f0, glass(r.λ)
     if r.in_medium
         n2, n1 = n1, n2
@@ -81,6 +82,42 @@ function evolve_ray(r::Ray, d_n_t, rndm)::Ray
     reflected_direction = reflect(r.dir, N)
     reflected_polarization = normalize(cross(reflected_direction, p_polarization))
     return Ray(p, reflected_direction, reflected_polarization, r.in_medium, n, r.dest, r.λ)
+
+end
+
+
+function evolve_ray(r::FastRay, d_n_t, rndm)::FastRay
+    d, n, t = d_n_t
+    if isinf(d)
+        return r
+    end
+    p = r.pos + r.dir * d
+
+    n1, n2 = 1.0f0, glass(r.λ)
+    if r.in_medium
+        n2, n1 = n1, n2
+    end
+    N = optical_normal(t, p)
+
+
+    if can_refract(r.dir, N, n1, n2)
+        # if we can reflect, scale probability between two polarizations
+        # NB T_p + R_p + T_s + T_p = 2
+        R = reflectance(r.dir, N, n1, n2)
+        if rndm <= R
+            return FastRay(
+                p,
+                refract(r.dir, N, n1, n2),
+                !r.in_medium,
+                n,
+                r.dest,
+                r.λ,
+            )
+        end
+    end
+
+    reflected_direction = reflect(r.dir, N)
+    return FastRay(p, reflected_direction, r.in_medium, n, r.dest, r.λ)
 end
 
 
@@ -103,11 +140,11 @@ function frame_matrix(
     G = Dict(s => zeros(Float32, height, width) for s in keys(skys))
     B = Dict(s => zeros(Float32, height, width) for s in keys(skys))
     #out .= RGBf(0, 0, 0)
-    λ_min = 400
-    λ_max = 700
+    λ_min = 400.0f0
+    λ_max = 700.0f0
     intensity = Float32(1 / ITERS) * 2
 
-    function init_ray(x, y, λ, dv)::Ray
+    function init_ray(x, y, λ, dv)::AbstractRay
         _x, _y = x - width / 2, y - height / 2
         scale = width * _COS_45 / camera.FOV_half_sin
         _x /= scale
@@ -181,7 +218,6 @@ function frame_matrix(
         end
 
         for r in host_rays
-            #out[r.dest] = isinf(d) ? RGBf(1.0, 0.0, 0.0) : RGBf(0.0, 0.0, 0.0)
             for s in keys(skys)
                 R[s][r.dest] += intensity * skys[s](r.dir, r.λ, phi) * retina_red(r.λ) * dλ
                 G[s][r.dest] +=
