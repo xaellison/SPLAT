@@ -1,11 +1,12 @@
 # RUN FROM /
+using Revise
 include("../geo.jl")
 include("../skys.jl")
 include("../tracer.jl")
 
 function main()
 
-    obj_path = "objs/s3.obj"
+    obj_path = "objs/s0.obj"
     tris = mesh_to_Tri(load(obj_path))
 	centroid = centroidish(tris)
 
@@ -26,7 +27,7 @@ function main()
 
     depth = 4
     dλ = 30
-    ITERS = 1
+    ITERS = 16
 
     skys = Dict("grey" => sky_color, "rezz" => sky_color_rezz)#
     for i = 1:frame_n

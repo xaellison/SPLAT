@@ -1,6 +1,7 @@
 include("material.jl")
 include("rgb_spectrum.jl")
 
+using ForwardDiff
 using Makie
 using ProgressMeter
 using Serialization
@@ -16,21 +17,47 @@ function get_hit(n_t::Tuple{Int32,T}, r::AbstractRay)::Tuple{Float32,Int32,T} wh
     end
 end
 
-function next_hit(rays, n_tris :: Array{Tuple{I, T}}) where {I, T}
-    dest = Array{Tuple{Float32, Int32, T}}(undef, size(rays))
-    @simd for i in 1:length(dest)
-        dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i]), n_tris, init=(Inf32, typemax(Int32), zero(T)))
+function get_hit(n_t::Tuple{Int32,T}, r::ADRay)::Tuple{Tuple{Float32,Float32},Int32,T} where {T}
+    n, t = n_t
+    d(λ) = distance_to_plane(r.pos + r.pos′ * (λ - r.λ), r.dir + r.dir′ * (λ - r.λ), t[2], t[1])
+    p = r.pos + r.dir * d(r.λ)
+    if in_triangle(p, t[2], t[3], t[4]) && d(r.λ) > 0 && r.ignore_tri != n
+        return ((d(r.λ), ForwardDiff.derivative(d, r.λ)), n, t)
+    else
+        return ((Inf32, Inf32), n, t)
     end
-
-    dest
 end
 
-function next_hit!(dest, rays, n_tris:: Array{Tuple{I, T}}) where {I, T}
+## !! Hit computers for AD and non-AD Rays
+
+function next_hit(rays :: AbstractArray{AbstractRay}, n_tris :: AbstractArray{Tuple{I, T}}) where {I, T}
+    dest = Array{Tuple{Float32, Int32, T}}(undef, size(rays))
+    next_hit!(dest, rays, n_tris)
+    return dest
+end
+
+function next_hit!(dest :: Array{Tuple{Float32, Int32, T}}, rays, n_tris:: AbstractArray{Tuple{I, T}}) where {I, T}
     @simd for i in 1:length(dest)
         dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i]), n_tris, init=(Inf32, typemax(Int32), zero(T)))
     end
     return nothing
 end
+
+
+function next_hit(rays :: AbstractArray{ADRay}, n_tris :: AbstractArray{Tuple{I, T}}) where {I, T}
+    dest = Array{Tuple{Tuple{Float32, Float32}, Int32, T}}(undef, size(rays))
+    next_hit!(dest, rays, n_tris)
+    return dest
+end
+
+function next_hit!(dest :: Array{Tuple{Tuple{Float32, Float32}, Int32, T}}, rays, n_tris:: AbstractArray{Tuple{I, T}}) where {I, T}
+    @simd for i in 1:length(dest)
+        dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i]), n_tris, init=((Inf32, Inf32), typemax(Int32), zero(T)))
+    end
+    return nothing
+end
+
+## Ray evolvers
 
 function evolve_ray(r::Ray, d_n_t, rndm)::Ray
     d, n, t = d_n_t
@@ -86,41 +113,50 @@ function evolve_ray(r::Ray, d_n_t, rndm)::Ray
 end
 
 
-function evolve_ray(r::FastRay, d_n_t, rndm)::FastRay
-    d, n, t = d_n_t
+function evolve_ray(r::ADRay, d_n_t, rndm)::ADRay
+    (d, d′), n, t = d_n_t
     if isinf(d)
         return r
     end
-    p = r.pos + r.dir * d
+    p(λ) = r.pos + # origin constant
+           r.pos′ * (λ - r.λ) +  #origin linear
+           (r.dir + # direction constant
+           r.dir′ * (λ - r.λ)) * # ... plus direction linear
+           (d + d′ * (λ - r.λ)) # times constant + linear distance
 
-    n1, n2 = 1.0f0, glass(r.λ)
+    n1, n2 = λ -> 1.0f0, glass
     if r.in_medium
         n2, n1 = n1, n2
     end
     N = optical_normal(t, p)
-
-
-    if can_refract(r.dir, N, n1, n2)
-        # if we can reflect, scale probability between two polarizations
-        # NB T_p + R_p + T_s + T_p = 2
-        R = reflectance(r.dir, N, n1, n2)
-        if rndm <= R
-            return FastRay(
-                p,
-                refract(r.dir, N, n1, n2),
-                !r.in_medium,
-                n,
-                r.dest,
-                r.λ,
-            )
+    in_medium = false
+    function d!(λ)
+        in_medium = r.in_medium
+        if can_refract(r.dir, N, n1(r.λ), n2(r.λ))
+            # if we can reflect, scale probability between two polarizations
+            # NB T_p + R_p + T_s + T_p = 2
+            R = reflectance(r.dir, N, n1(λ), n2(λ))
+            if rndm <= R
+                direction = refract(r.dir + r.dir′ * (λ - r.λ), N, n1(λ), n2(λ))
+                in_medium = !in_medium
+                return direction
+            end
         end
+        direction = reflect(r.dir + r.dir′ * (λ - r.λ), N)
+        # 1 is in_medium
+        return direction
     end
 
-    reflected_direction = reflect(r.dir, N)
-    return FastRay(p, reflected_direction, r.in_medium, n, r.dest, r.λ)
+
+    return ADRay(p(r.λ),
+                 ForwardDiff.derivative(p, r.λ),
+                 d!(r.λ),
+                 ForwardDiff.derivative(d!, r.λ),
+                 in_medium, n, r.dest, r.λ)
 end
 
 
+## Wrap it all up
 
 function frame_matrix(
     camera_generator::Function,
@@ -159,7 +195,7 @@ function frame_matrix(
         dir = normalize(dir)
         idx = (x - 1) * height + y
         polarization = normalize(cross(camera.up, dir))
-        return Ray(camera.pos, dir, polarization, false, 0, idx, λ)
+        return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 0, idx, λ)
     end
 
     I = map(Int32, collect(1:length(tris)))
@@ -174,7 +210,8 @@ function frame_matrix(
     rndm = nothing
     host_rays = nothing
     dv = nothing
-    @showprogress for (iter, λ) in [(iter, λ) for iter = 1:ITERS for λ = λ_min:dλ:λ_max]
+    #@showprogress for (iter, λ) in [(iter, λ) for iter = 1:ITERS for λ = λ_min:dλ:λ_max]
+    @showprogress for iter = 1:ITERS
 
         if has_run
             dv .=
@@ -183,7 +220,7 @@ function frame_matrix(
                     random(Float32, width),
                     random(Float32, width),
                 )
-            rays .= reshape(init_ray.(row_indices, col_indices, λ, dv), width * height)
+            rays .= reshape(init_ray.(row_indices, col_indices, 550.0, dv), width * height)
         else
             rndm = random(Float32, width * height)
             dv =
@@ -192,21 +229,21 @@ function frame_matrix(
                     random(Float32, width),
                     random(Float32, width),
                 )
-            rays = reshape(init_ray.(row_indices, col_indices, λ, dv), width * height)
+            rays = reshape(init_ray.(row_indices, col_indices, 550.0, dv), width * height)
         end
 
         rndm .= random(Float32, width * height)
         if has_run
             next_hit!(hits, rays, n_tris)
         else
-            hits = next_hit(rays, n_tris)#minimum(Broadcast.broadcasted(get_hit, n_tris, rays), dims=2, init=(Inf32, typemax(Int32), zero(STri)))
+            hits = next_hit(rays, n_tris)
         end
         #	@info "tada"
         for iter = 2:depth
             rndm .= random(Float32, width * height)
             #map!(d_r -> d_r[2], rays, hits)
             map!(evolve_ray, rays, rays, hits, rndm)
-            hits = next_hit(rays, n_tris)#hits = minimum(Broadcast.broadcasted(get_hit, n_tris, rays), dims=2, init=(Inf32, typemax(Int32), zero(STri)))
+            hits = next_hit(rays, n_tris)
         end
         rndm .= random(Float32, width * height)
         map!(evolve_ray, rays, rays, hits, rndm)
@@ -219,10 +256,12 @@ function frame_matrix(
 
         for r in host_rays
             for s in keys(skys)
-                R[s][r.dest] += intensity * skys[s](r.dir, r.λ, phi) * retina_red(r.λ) * dλ
-                G[s][r.dest] +=
-                    intensity * skys[s](r.dir, r.λ, phi) * retina_green(r.λ) * dλ
-                B[s][r.dest] += intensity * skys[s](r.dir, r.λ, phi) * retina_blue(r.λ) * dλ
+                for λ in λ_min:dλ:λ_max
+                    d_λ = r.dir + r.dir′ * (λ - r.λ)
+                    R[s][r.dest] += intensity * skys[s](d_λ, λ, phi) * retina_red(λ) * dλ
+                    G[s][r.dest] += intensity * skys[s](d_λ, λ, phi) * retina_green(λ) * dλ
+                    B[s][r.dest] += intensity * skys[s](d_λ, λ, phi) * retina_blue(λ) * dλ
+                end
             end
         end
 

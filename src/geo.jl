@@ -29,6 +29,17 @@ end
 
 abstract type AbstractRay end
 
+struct ADRay <: AbstractRay
+    pos::V3
+    pos′::V3
+    dir::V3
+    dir′::V3
+    in_medium::Bool
+    ignore_tri::Int
+    dest::Int
+    λ::Float32
+end
+
 struct Ray <: AbstractRay
     pos::V3
     dir::V3
@@ -281,11 +292,10 @@ function rotation_matrix(axis, θ)
 end
 
 @inline function distance_to_plane(
-    origin::V3,
-    dir::V3,
-    plane_point::V3,
-    normal::V3,
-)::Float32
+    origin,
+    dir,
+    plane_point,
+    normal)
     normal = normalize(normal)
     dist = (dot(normal, plane_point) - dot(normal, origin)) / dot(normal, dir)
 end
@@ -345,7 +355,7 @@ function project(a::V3, b::V3)::V3
     return b * (dot(a, b) / (norm(b)))
 end
 
-function reflect(v::V3, normal::V3)::V3
+function reflect(v, normal)
     normal = normalize(normal)
     temp = v - normal * dot(normal, v) * 2
     #vector_cosine(v, normal) ≈ -1*vector_cosine(temp, normal)
@@ -404,7 +414,7 @@ function reflectance_p(v::V3, normal::V3, n1, n2)
     return ((n1 * s2 - n2 * c1) / (n1 * s2 + n2 * c1))^2
 end
 
-function can_refract(v::V3, normal::V3, n1, n2)::Bool
+function can_refract(v, normal, n1, n2)::Bool
     # use the normal pointing up from the plane if dir is coming down into it
     n = normalize(normal)
     if dot(n, v) > 0.0f0
@@ -419,7 +429,7 @@ function can_refract(v::V3, normal::V3, n1, n2)::Bool
     return abs(s2) < 0.99f0
 end
 
-function refract(v::V3, normal::V3, n1, n2)::V3
+function refract(v, normal, n1, n2)
     # use the normal pointing up from the plane if dir is coming down into it
     # see https://en.wikipedia.org/wiki/Snell%27s_law#Vector_form for sign logic
     n = normalize(normal)
