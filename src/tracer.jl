@@ -129,7 +129,7 @@ function evolve_ray(r::ADRay, d_n_t, rndm)::ADRay
     if r.in_medium
         n2, n1 = n1, n2
     end
-    N(λ) = optical_normal(t, p(r.λ))
+    N(λ) = optical_normal(t, p(λ))
     in_medium = false
 
     refracts = can_refract(r.dir, N(r.λ), n1(r.λ), n2(r.λ)) && rndm > reflectance(r.dir, N(r.λ), n1(r.λ), n2(r.λ))
