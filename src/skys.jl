@@ -1,7 +1,7 @@
 
 function sky_color(dir, λ, phi) ::Float32
 	d = normalize(dir)
-	out = 0.1+0.7*d[3] ^ 2
+	out = 0.1+(0.7*(d[3] ^ 3 * 0.5 + 0.5))
 	if isnan(out)
 		return 0.0f0
 	end
@@ -46,7 +46,7 @@ end
 
 
 
-function sky_stripes(dir :: AbstractArray{T}, λ::T, phi::T)::T where T
+function sky_rings(dir :: AbstractArray{T}, λ::T, phi::T)::T where T
 	t1 = atan(dir[1], sqrt(dir[2]^2+dir[3]^2))
 
 	if t1 < 0
@@ -55,8 +55,37 @@ function sky_stripes(dir :: AbstractArray{T}, λ::T, phi::T)::T where T
 		t1 += phi
 	end
 
-	k = 2 * pi / 80
+	k = 2 * pi / 20
 	if abs(t1) % k < k/2
+		return 1.0
+	end
+	return 0.0
+end
+
+function sky_curtains(dir :: AbstractArray{T}, λ::T, phi::T)::T where T
+	t1 = atan(dir[2], sqrt(dir[3]^2+dir[1]^2))
+
+	if t1 < 0
+		t1 -= phi
+	else
+		t1 += phi
+	end
+
+	k = 2 * pi / 20
+	if abs(t1) % k < k/2
+		return 1.0
+	end
+	return 0.0
+end
+
+
+function sky_stripes_down(dir :: AbstractArray{T}, λ::T, phi::T)::T where T
+	t1 = atan(dir[3], sqrt(dir[1]^2+dir[2]^2))
+
+	t1 += phi
+
+	k = 2 * pi / 20
+	if (t1 + pi) % k < k/2
 		return 1.0
 	end
 	return 0.0

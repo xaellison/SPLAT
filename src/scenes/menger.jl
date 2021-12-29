@@ -13,7 +13,7 @@ function main()
 	println(model_box(tris))
     #tris = parse_obj(obj_path)
     @info "$(length(tris)) triangles"
-    width = 512
+    width = 1024
     height = Int(width * 3 / 4)
     frame_n = 720
 
@@ -27,13 +27,14 @@ function main()
 	end
 
     depth = 9
-    dλ = 30
-    ITERS = 16
+    dλ = 10
+    ITERS = 4
 
-    skys = [sky_stripes]
+    skys = [sky_stripes_down]
+
     Threads.@threads for i = 1:frame_n
 
-		R = rotation_matrix(V3(1, 1, 1), 2 * pi * i / frame_n)
+		R = rotation_matrix(V3(1, 1, 1), 2 * pi / 3 * i / frame_n)
         #translate(t, v) = STri(t[1], t[2] - v, t[3] - v, t[4] - v, t[5:7]...)
 		#translate(t, v) = STri(t[1], t[2] - v, t[3] - v, t[4] - v, t[5], t[6], t[7])
 		translate(t, v) = Tri(t[1], t[2] - v, t[3] - v, t[4] - v)
@@ -51,12 +52,12 @@ function main()
             dλ,
             depth,
             ITERS,
-            Float32(2 * pi / 40 * i / frame_n),
+            Float32(2 * pi / 10 * i / frame_n),
             rand,
             Array
         )
-        for s in keys(skys)
-            Makie.save("out/menger/$(s)/$(lpad(i, 3, "0")).png", images[s])
+        for (sky_n, s) in enumerate(skys)
+            Makie.save("out/menger/$(nameof(s))/$(lpad(i, 3, "0")).png", images[sky_n])
         end
 
     end

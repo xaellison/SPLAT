@@ -81,7 +81,7 @@ function evolve_ray(r::Ray, d_n_t, rndm)::Ray
         # NB T_p + R_p + T_s + T_p = 2
         r_s = reflectance_s(r.dir, N, n1, n2)
         r_p = reflectance_p(r.dir, N, n1, n2)
-        if rndm <= r_s / 2.0f0
+        if rndm <= (1 - r_s) / 2.0f0
             s_polarization = normalize(s_polarization)
             return Ray(
                 p,
@@ -92,7 +92,7 @@ function evolve_ray(r::Ray, d_n_t, rndm)::Ray
                 r.dest,
                 r.λ,
             )
-        elseif rndm <= (r_s + r_p) / 2.0f0
+        elseif rndm <= (2 - r_s - r_p) / 2.0f0
             p_polarization = normalize(p_polarization)
             return Ray(
                 p,
@@ -132,7 +132,7 @@ function evolve_ray(r::ADRay, d_n_t, rndm)::ADRay
     N(λ) = optical_normal(t, p(r.λ))
     in_medium = false
 
-    refracts = can_refract(r.dir, N(r.λ), n1(r.λ), n2(r.λ)) && rndm <= reflectance(r.dir, N(r.λ), n1(r.λ), n2(r.λ))
+    refracts = can_refract(r.dir, N(r.λ), n1(r.λ), n2(r.λ)) && rndm > reflectance(r.dir, N(r.λ), n1(r.λ), n2(r.λ))
     in_medium = refracts ? !r.in_medium : r.in_medium
 
     if refracts
@@ -213,7 +213,7 @@ function ad_frame_matrix(
     I = nothing
     s0 = nothing
     #@showprogress for (iter, λ) in [(iter, λ) for iter = 1:ITERS for λ = λ_min:dλ:λ_max]
-    @showprogress for iter = 1:ITERS
+    for iter = 1:ITERS
 
         if has_run
             dv .=
@@ -317,9 +317,9 @@ function frame_matrix(
     A, # type: either Array or CuArray
 )
     camera = camera_generator(1, 1)
-    R = Dict(s => zeros(Float32, height, width) for s in keys(skys))
-    G = Dict(s => zeros(Float32, height, width) for s in keys(skys))
-    B = Dict(s => zeros(Float32, height, width) for s in keys(skys))
+    R = [zeros(Float32, height, width) for s in skys]
+    G = [zeros(Float32, height, width) for s in skys]
+    B = [zeros(Float32, height, width) for s in skys]
     #out .= RGBf(0, 0, 0)
     λ_min = 400.0f0
     λ_max = 700.0f0
