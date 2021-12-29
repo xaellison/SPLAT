@@ -9,7 +9,7 @@ function sky_color(dir, λ, phi) ::Float32
 end
 
 
-function sky_color_rezz(dir, λ, phi)
+function sky_color_rezz(dir :: AbstractArray{T}, λ::T, phi::T)::T where T
 	t1 = atan(dir[1], sqrt(dir[2]^2+dir[3]^2))
 	t2 = atan(dir[2], sqrt(dir[1]^2+dir[3]^2))
 	t3 = atan(dir[3], sqrt(dir[1]^2+dir[2]^2))
@@ -37,8 +37,26 @@ function sky_color_rezz(dir, λ, phi)
 	if t3 < 0
 		t3 += pi
 	end
-	k = 2*pi/4
+	k = 2*pi/80
 	if xor(abs(t1) % k < k/2, abs(t2) % k < k/2, abs(t3) % k < k/2)
+		return 1.0
+	end
+	return 0.0
+end
+
+
+
+function sky_stripes(dir :: AbstractArray{T}, λ::T, phi::T)::T where T
+	t1 = atan(dir[1], sqrt(dir[2]^2+dir[3]^2))
+
+	if t1 < 0
+		t1 -= phi
+	else
+		t1 += phi
+	end
+
+	k = 2 * pi / 80
+	if abs(t1) % k < k/2
 		return 1.0
 	end
 	return 0.0

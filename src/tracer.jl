@@ -19,10 +19,11 @@ end
 
 function get_hit(n_t::Tuple{Int32,T}, r::ADRay)::Tuple{Tuple{Float32,Float32},Int32,T} where {T}
     n, t = n_t
+    d0 = distance_to_plane(r.pos, r.dir, t[2], t[1])
     d(λ) = distance_to_plane(r.pos + r.pos′ * (λ - r.λ), r.dir + r.dir′ * (λ - r.λ), t[2], t[1])
-    p = r.pos + r.dir * d(r.λ)
-    if in_triangle(p, t[2], t[3], t[4]) && d(r.λ) > 0 && r.ignore_tri != n
-        return ((d(r.λ), ForwardDiff.derivative(d, r.λ)), n, t)
+    p = r.pos + r.dir * d0
+    if in_triangle(p, t[2], t[3], t[4]) && d0 > 0 && r.ignore_tri != n
+        return ((d0, ForwardDiff.derivative(d, r.λ)), n, t)
     else
         return ((Inf32, Inf32), n, t)
     end
@@ -130,29 +131,28 @@ function evolve_ray(r::ADRay, d_n_t, rndm)::ADRay
     end
     N = optical_normal(t, p)
     in_medium = false
-    function d!(λ)
-        in_medium = r.in_medium
-        if can_refract(r.dir, N, n1(r.λ), n2(r.λ))
-            # if we can reflect, scale probability between two polarizations
-            # NB T_p + R_p + T_s + T_p = 2
-            R = reflectance(r.dir, N, n1(λ), n2(λ))
-            if rndm <= R
-                direction = refract(r.dir + r.dir′ * (λ - r.λ), N, n1(λ), n2(λ))
-                in_medium = !in_medium
-                return direction
-            end
-        end
-        direction = reflect(r.dir + r.dir′ * (λ - r.λ), N)
-        # 1 is in_medium
-        return direction
+
+    refracts = can_refract(r.dir, N, n1(r.λ), n2(r.λ)) && rndm <= reflectance(r.dir, N, n1(r.λ), n2(r.λ))
+    in_medium = refracts ? !r.in_medium : r.in_medium
+
+    if refracts
+        return ADRay(p(r.λ),
+                     ForwardDiff.derivative(p, r.λ),
+                     refract(r.dir, N, n1(r.λ), n2(r.λ)),
+                     ForwardDiff.derivative(λ -> refract(r.dir + r.dir′ * (λ - r.λ), N, n1(λ), n2(λ)), r.λ),
+                     in_medium, n, r.dest, r.λ)
+
+    else
+        return ADRay(p(r.λ),
+                     ForwardDiff.derivative(p, r.λ),
+                     reflect(r.dir, N),
+                     ForwardDiff.derivative(λ -> reflect(r.dir + r.dir′ * (λ - r.λ), N), r.λ),
+                     in_medium, n, r.dest, r.λ)
     end
 
 
-    return ADRay(p(r.λ),
-                 ForwardDiff.derivative(p, r.λ),
-                 d!(r.λ),
-                 ForwardDiff.derivative(d!, r.λ),
-                 in_medium, n, r.dest, r.λ)
+
+
 end
 
 
@@ -163,7 +163,7 @@ function frame_matrix(
     width::Int,
     height::Int,
     tris,
-    skys,
+    skys,#::AbstractArray{Function},
     dλ,
     depth,
     ITERS,
@@ -172,9 +172,9 @@ function frame_matrix(
     A, # type: either Array or CuArray
 )
     camera = camera_generator(1, 1)
-    R = Dict(s => zeros(Float32, height, width) for s in keys(skys))
-    G = Dict(s => zeros(Float32, height, width) for s in keys(skys))
-    B = Dict(s => zeros(Float32, height, width) for s in keys(skys))
+    R = [zeros(Float32, height, width) for s in skys]
+    G = [zeros(Float32, height, width) for s in skys]
+    B = [zeros(Float32, height, width) for s in skys]
     #out .= RGBf(0, 0, 0)
     λ_min = 400.0f0
     λ_max = 700.0f0
@@ -210,8 +210,11 @@ function frame_matrix(
     rndm = nothing
     host_rays = nothing
     dv = nothing
+    I = nothing
+    s0 = nothing
     #@showprogress for (iter, λ) in [(iter, λ) for iter = 1:ITERS for λ = λ_min:dλ:λ_max]
-    @showprogress for iter = 1:ITERS
+    #@showprogress 
+    for iter = 1:ITERS
 
         if has_run
             dv .=
@@ -254,14 +257,28 @@ function frame_matrix(
             host_rays = Array(rays)
         end
 
-        for r in host_rays
-            for s in keys(skys)
-                for λ in λ_min:dλ:λ_max
-                    d_λ = r.dir + r.dir′ * (λ - r.λ)
-                    R[s][r.dest] += intensity * skys[s](d_λ, λ, phi) * retina_red(λ) * dλ
-                    G[s][r.dest] += intensity * skys[s](d_λ, λ, phi) * retina_green(λ) * dλ
-                    B[s][r.dest] += intensity * skys[s](d_λ, λ, phi) * retina_blue(λ) * dλ
+
+        for λ in λ_min:dλ:λ_max
+            r0, g0, b0 = retina_red(λ), retina_green(λ), retina_blue(λ)
+            for (i, sky) in enumerate(skys)
+
+                g = r -> sky(r.dir + r.dir′ * (λ - r.λ), λ, phi)
+
+                if isnothing(I)
+                    I = map(r->r.dest, host_rays)
+                else
+                    map!(r->r.dest, I, host_rays)
                 end
+
+                if isnothing(s0)
+                    s0 = g.(host_rays)
+                else
+                    map!(g, s0, host_rays)
+                end
+
+                R[i][I] .+= intensity * s0 * r0 * dλ
+                G[i][I] .+= intensity * s0 * g0 * dλ
+                B[i][I] .+= intensity * s0 * b0 * dλ
             end
         end
 

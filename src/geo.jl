@@ -262,6 +262,11 @@ function model_box(tris::Array{T}) where {T <: Union{Tri, STri}}
     return (min_x, max_x, min_y, max_y, min_z, max_z)
 end
 
+function _centroid(tris)::V3
+    avg(i) = sum(sum(v[i] for v in t[2:4]) for t in tris) / (3 * length(tris))
+    return V3(map(avg, [1,2,3])...)
+end
+
 function centroidish(tris) :: V3
     v = model_box(tris)
     lo = V3(v[1:2:end]...)
