@@ -13,8 +13,8 @@ function main()
 	println(model_box(tris))
     #tris = parse_obj(obj_path)
     @info "$(length(tris)) triangles"
-    width = 300
-    height = Int(width * 3 / 4)
+    width = 512
+    height = 512#Int(width * 3 / 4)
     frame_n = 60
 
 	function moving_camera(frame_i, frame_n)
@@ -31,7 +31,7 @@ function main()
     ITERS = 16
 
     skys = [sky_stripes_down]
-    Threads.@threads for i = 1:frame_n
+    for i = 1:frame_n
 
 		R = rotation_matrix(V3(1, 1, 1), 2 * pi * 0 / frame_n)
         #translate(t, v) = STri(t[1], t[2] - v, t[3] - v, t[4] - v, t[5:7]...)
@@ -52,8 +52,8 @@ function main()
             depth,
             ITERS,
             Float32(2 * pi / 20 * i / frame_n),
-            rand,
-            Array
+            CUDA.rand,
+            CuArray
         )
         for s in keys(skys)
             Makie.save("out/sphere/$(s)/$(lpad(i, 3, "0")).png", images[s])

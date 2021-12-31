@@ -127,7 +127,7 @@ function optical_normal(t::Tri, p)
     t[1]
 end
 
-function optical_normal(t::STri, pos)
+function optical_normal(t::STri, pos :: V) :: V where V
     #return t[1]
     a, b, c = t[2], t[3], t[4]
     n_a, n_b, n_c = t[5], t[6], t[7]
@@ -373,7 +373,7 @@ function reflect(v, normal)
     return temp
 end
 
-function reflectance(v::V3, normal::V3, n1, n2)
+function reflectance(v, normal, n1, n2)
     # https://en.wikipedia.org/wiki/Schlick%27s_approximation
     # fascinatingly, schlick gives non-zero reflectance if the media have same n
     # so we resort to using the average of s and p polarizations
@@ -440,6 +440,10 @@ function can_refract(v, normal, n1, n2)::Bool
     return abs(s2) < 0.99f0
 end
 
+function can_refract_λ(v, normal, n1, n2, λ::N) where N
+    return can_refract(v(λ), normal(λ), n1(λ), n2(λ))
+end
+
 function refract(v, normal, n1, n2)
     # use the normal pointing up from the plane if dir is coming down into it
     # see https://en.wikipedia.org/wiki/Snell%27s_law#Vector_form for sign logic
@@ -453,4 +457,8 @@ function refract(v, normal, n1, n2)
     s2 = (n1 / n2) * s1
     c2 = sqrt(1 - s2 * s2)
     return normalize(v * (n1 / n2) + n * ((n1 / n2) * c1 - c2))
+end
+
+function refract_λ(v, n, n1, n2, λ::N) where N
+    return refract(v(λ), normal(λ), n1(λ), n2(λ))
 end
