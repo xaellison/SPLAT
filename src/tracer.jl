@@ -1,8 +1,6 @@
 include("material.jl")
 include("rgb_spectrum.jl")
-include("cuda.jl")
 
-using CUDA
 using ForwardDiff
 using Makie
 using ProgressMeter
