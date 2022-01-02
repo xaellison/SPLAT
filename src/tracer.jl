@@ -45,15 +45,19 @@ function next_hit!(dest :: Array{Tuple{Float32, Int32, T}}, rays, n_tris:: Abstr
 end
 
 
-function next_hit(rays :: AbstractArray{ADRay}, n_tris :: AbstractArray{Tuple{I, T}}) where {I, T}
+function next_hit(rays :: AbstractArray{ADRay}, n_tris :: AbstractArray{Tuple{I, T}}, override) where {I, T}
     dest = Array{Tuple{Tuple{Float32, Float32}, Int32, T}}(undef, size(rays))
-    next_hit!(dest, rays, n_tris)
+    next_hit!(dest, rays, n_tris, override)
     return dest
 end
 
-function next_hit!(dest :: Array{Tuple{Tuple{Float32, Float32}, Int32, T}}, rays, n_tris:: AbstractArray{Tuple{I, T}}) where {I, T}
-    @simd for i in 1:length(dest)
-        dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i]), n_tris, init=((Inf32, Inf32), typemax(Int32), zero(T)))
+function next_hit!(dest :: Array{Tuple{Tuple{Float32, Float32}, Int32, T}}, rays, n_tris:: AbstractArray{Tuple{I, T}}, override=false) where {I, T}
+    for i in 1:length(dest)
+        if !rays[i].retired || override
+            dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i]), n_tris, init=((Inf32, Inf32), typemax(Int32), zero(T)))
+        else
+            dest[i] = ((Inf32, Inf32), typemax(Int32), zero(T))
+        end
     end
     return nothing
 end
@@ -117,7 +121,7 @@ end
 function evolve_ray(r::ADRay, d_n_t, rndm)::ADRay
     (d, d′), n, t = d_n_t
     if isinf(d)
-        return r
+        return retired(r)
     end
     p(λ) = r.pos + # origin constant
            r.pos′ * (λ - r.λ) +  #origin linear
@@ -140,14 +144,14 @@ function evolve_ray(r::ADRay, d_n_t, rndm)::ADRay
                      ForwardDiff.derivative(p, r.λ),
                      refract(r.dir, N(r.λ), n1(r.λ), n2(r.λ)),
                      ForwardDiff.derivative(λ -> refract(r.dir + r.dir′ * (λ - r.λ), N(r.λ), n1(λ), n2(λ)), r.λ),
-                     in_medium, n, r.dest, r.λ)
+                     in_medium, n, r.dest, r.λ, false)
 
     else
         return ADRay(p(r.λ),
                      ForwardDiff.derivative(p, r.λ),
                      reflect(r.dir, N(r.λ)),
                      ForwardDiff.derivative(λ -> reflect(r.dir + r.dir′ * (λ - r.λ), N(λ)), r.λ),
-                     in_medium, n, r.dest, r.λ)
+                     in_medium, n, r.dest, r.λ, false)
     end
 
 
@@ -195,7 +199,7 @@ function ad_frame_matrix(
         dir = normalize(dir)
         idx = (x - 1) * height + y
         polarization = normalize(cross(camera.up, dir))
-        return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 0, idx, λ)
+        return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 0, idx, λ, false)
     end
 
     I = map(Int32, collect(1:length(tris)))
@@ -234,18 +238,18 @@ function ad_frame_matrix(
             rays = reshape(init_ray.(row_indices, col_indices, 550.0, dv), width * height)
         end
 
-        rndm .= random(Float32, width * height)
+        rndm .= random(Float32, length(rays))
         if has_run
-            next_hit!(hits, rays, n_tris)
+            next_hit!(hits, rays, n_tris, false)
         else
-            hits = next_hit(rays, n_tris)
+            hits = next_hit(rays, n_tris, true)
         end
         #	@info "tada"
         for iter = 2:depth
-            rndm .= random(Float32, width * height)
+            rndm .= random(Float32, length(rays))
             #map!(d_r -> d_r[2], rays, hits)
             map!(evolve_ray, rays, rays, hits, rndm)
-            hits = next_hit(rays, n_tris)
+            next_hit!(hits, rays, n_tris, false)
         end
         rndm .= random(Float32, width * height)
         map!(evolve_ray, rays, rays, hits, rndm)
@@ -261,7 +265,7 @@ function ad_frame_matrix(
             r0, g0, b0 = retina_red(λ), retina_green(λ), retina_blue(λ)
             for (i, sky) in enumerate(skys)
 
-                g = r -> sky(r.dir + r.dir′ * (λ - r.λ), λ, phi)
+                g = r -> r.in_medium ? 0.0f0 : sky(r.dir + r.dir′ * (λ - r.λ), λ, phi)
 
                 if isnothing(I)
                     I = map(r->r.dest, host_rays)

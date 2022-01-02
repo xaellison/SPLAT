@@ -38,6 +38,12 @@ struct ADRay <: AbstractRay
     ignore_tri::Int
     dest::Int
     λ::Float32
+    retired::Bool
+end
+
+function retired(ray::ADRay)
+    return ADRay(ray.pos, ray.pos′, ray.dir, ray.dir′,
+                 ray.in_medium, ray.ignore_tri, ray.dest, ray.λ, true)
 end
 
 struct Ray <: AbstractRay
