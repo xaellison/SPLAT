@@ -117,46 +117,46 @@ function evolve_ray(r::Ray, d_n_t, rndm)::Ray
 
 end
 
+function p(r, d, d′, λ::N) where N
+    r.pos + # origin constant
+    r.pos′ * (λ - r.λ) +  #origin linear
+    (r.dir + # direction constant
+    r.dir′ * (λ - r.λ)) * # ... plus direction linear
+    (d + d′ * (λ - r.λ)) # times constant + linear distance
+end
 
-function evolve_ray(r::ADRay, d_n_t, rndm)::ADRay
-    (d, d′), n, t = d_n_t
-    if isinf(d)
-        return retired(r)
-    end
-    p(λ) = r.pos + # origin constant
-           r.pos′ * (λ - r.λ) +  #origin linear
-           (r.dir + # direction constant
-           r.dir′ * (λ - r.λ)) * # ... plus direction linear
-           (d + d′ * (λ - r.λ)) # times constant + linear distance
-
-    n1, n2 = λ -> 1.0f0, glass
-    if r.in_medium
-        n2, n1 = n1, n2
-    end
-    N(λ) = optical_normal(t, p(λ))
-    in_medium = false
-
+function handle_optics(r, d, d′, n, N, n1 :: N1, n2::N2, rndm) where {N1, N2}
     refracts = can_refract(r.dir, N(r.λ), n1(r.λ), n2(r.λ)) && rndm > reflectance(r.dir, N(r.λ), n1(r.λ), n2(r.λ))
-    in_medium = refracts ? !r.in_medium : r.in_medium
 
     if refracts
-        return ADRay(p(r.λ),
-                     ForwardDiff.derivative(p, r.λ),
+        return ADRay(p(r, d, d′, r.λ),
+                     ForwardDiff.derivative(λ->p(r, d, d′, λ), r.λ),
                      refract(r.dir, N(r.λ), n1(r.λ), n2(r.λ)),
                      ForwardDiff.derivative(λ -> refract(r.dir + r.dir′ * (λ - r.λ), N(r.λ), n1(λ), n2(λ)), r.λ),
-                     in_medium, n, r.dest, r.λ, false)
+                     !r.in_medium, n, r.dest, r.λ, false)
 
     else
-        return ADRay(p(r.λ),
-                     ForwardDiff.derivative(p, r.λ),
+        return ADRay(p(r, d, d′, r.λ),
+                     ForwardDiff.derivative(λ->p(r, d, d′, λ), r.λ),
                      reflect(r.dir, N(r.λ)),
                      ForwardDiff.derivative(λ -> reflect(r.dir + r.dir′ * (λ - r.λ), N(λ)), r.λ),
-                     in_medium, n, r.dest, r.λ, false)
+                     r.in_medium, n, r.dest, r.λ, false)
+    end
+end
+
+function evolve_ray(r::ADRay, d_n_t :: Tuple{Tuple{R, R}, I, T}, rndm)::ADRay where {R<:Real, I<:Integer, T}
+    (d, d′), n, t = d_n_t
+    if isinf(d)
+        return r
     end
 
 
-
-
+    N(λ) = optical_normal(t, p(r, d, d′, λ))
+    if r.in_medium
+        return handle_optics(r, d, d′, n, N, glass, air, rndm)
+    else
+        return handle_optics(r, d, d′, n, N, air, glass, rndm)
+    end
 end
 
 
@@ -176,9 +176,9 @@ function ad_frame_matrix(
     A, # type: either Array or CuArray
 )
     camera = camera_generator(1, 1)
-    R = [zeros(Float32, height, width) for s in skys]
-    G = [zeros(Float32, height, width) for s in skys]
-    B = [zeros(Float32, height, width) for s in skys]
+    R = [A(zeros(Float32, height, width)) for s in skys]
+    G = [A(zeros(Float32, height, width)) for s in skys]
+    B = [A(zeros(Float32, height, width)) for s in skys]
     #out .= RGBf(0, 0, 0)
     λ_min = 400.0f0
     λ_max = 700.0f0
@@ -203,7 +203,7 @@ function ad_frame_matrix(
     end
 
     I = map(Int32, collect(1:length(tris)))
-    n_tris = collect(zip(I, tris)) |> A |> m -> reshape(m, 1, length(m))
+    n_tris = collect(zip(I, tris)) |> A |> m -> reshape(m, 1, length(m)) |> A
 
     row_indices = A(1:width)
     col_indices = reshape(A(1:height), 1, height)
@@ -212,7 +212,6 @@ function ad_frame_matrix(
     hits = nothing
     grid = nothing
     rndm = nothing
-    host_rays = nothing
     dv = nothing
     I = nothing
     s0 = nothing
@@ -244,7 +243,7 @@ function ad_frame_matrix(
         else
             hits = next_hit(rays, n_tris, true)
         end
-        #	@info "tada"
+        #
         for iter = 2:depth
             rndm .= random(Float32, length(rays))
             #map!(d_r -> d_r[2], rays, hits)
@@ -254,11 +253,7 @@ function ad_frame_matrix(
         rndm .= random(Float32, width * height)
         map!(evolve_ray, rays, rays, hits, rndm)
 
-        if has_run
-            copyto!(host_rays, rays)
-        else
-            host_rays = Array(rays)
-        end
+
 
 
         for λ in λ_min:dλ:λ_max
@@ -268,15 +263,15 @@ function ad_frame_matrix(
                 g = r -> r.in_medium ? 0.0f0 : sky(r.dir + r.dir′ * (λ - r.λ), λ, phi)
 
                 if isnothing(I)
-                    I = map(r->r.dest, host_rays)
+                    I = map(r->r.dest, rays)
                 else
-                    map!(r->r.dest, I, host_rays)
+                    map!(r->r.dest, I, rays)
                 end
 
                 if isnothing(s0)
-                    s0 = g.(host_rays)
+                    s0 = g.(rays)
                 else
-                    map!(g, s0, host_rays)
+                    map!(g, s0, rays)
                 end
 
                 R[i][I] .+= intensity * s0 * r0 * dλ
@@ -290,7 +285,7 @@ function ad_frame_matrix(
 
     out = Dict()
     for s in keys(skys)
-        _R, _G, _B = R[s], G[s], B[s]
+        _R, _G, _B = map(Array, (R[s], G[s], B[s]))
         img = Array{RGBf}(undef, size(_R)...)
         @simd for i = 1:length(img)
             if isnan(_R[i]) || isnan(_G[i]) || isnan(_B[i])
@@ -388,7 +383,7 @@ function frame_matrix(
         else
             hits = next_hit(rays, n_tris)#minimum(Broadcast.broadcasted(get_hit, n_tris, rays), dims=2, init=(Inf32, typemax(Int32), zero(STri)))
         end
-        #	@info "tada"
+        #
         for iter = 2:depth
             rndm .= random(Float32, width * height)
             #map!(d_r -> d_r[2], rays, hits)

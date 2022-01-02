@@ -1,6 +1,8 @@
+using CUDA
+## new gpu AD only
 
-function next_hit_kernel(rays, tris, dest, default)
-    shmem = @cuDynamicSharedMem(STri, blockDim().x)
+function next_hit_kernel(rays, tris :: AbstractArray{T}, dest, default) where T
+    shmem = @cuDynamicSharedMem(T, blockDim().x)
     i = threadIdx().x
     dest_idx = i + (blockIdx().x - 1) * blockDim().x
     r = rays[dest_idx]
@@ -10,21 +12,24 @@ function next_hit_kernel(rays, tris, dest, default)
     min_val = Inf32
     while iter <= length(tris) ÷ blockDim().x
         if i + iter * blockDim().x <= length(tris)
-            shmem[i] = tris[i+iter*blockDim().x][2]
+            shmem[i] = tris[i+iter*blockDim().x]
         end
 
         sync_threads()
         for scan = 1:min(blockDim().x, length(tris) - iter * blockDim().x)
             sync_threads()
-            t = shmem[scan]
-            d = distance_to_plane(r.pos, r.dir, t[2], t[1])
-            p = r.pos + r.dir * d
-            n = Int32(iter * blockDim().x + scan)
-            if min_val > d > 0 && r.ignore_tri != n && in_triangle(p, t[2], t[3], t[4])
-                min_val = d
-                arg_min = (d, n, t)
+            n, t = shmem[scan]
+            ####
+            d0 = distance_to_plane(r.pos, r.dir, t[2], t[1])
+            d(λ) = distance_to_plane(r.pos + r.pos′ * (λ - r.λ), r.dir + r.dir′ * (λ - r.λ), t[2], t[1])
+            p = r.pos + r.dir * d0
+            if in_triangle(p, t[2], t[3], t[4]) && min_val > d0 > 0 && r.ignore_tri != n
+                arg_min = ((d0, ForwardDiff.derivative(d, r.λ)), n, t)
+                min_val = d0
             end
-        end        iter += 1
+            ####
+        end
+        iter += 1
     end
     if dest_idx <= length(rays)
         dest[dest_idx] = arg_min
@@ -32,27 +37,22 @@ function next_hit_kernel(rays, tris, dest, default)
     return nothing
 end
 
-function next_hit(rays, n_tris)
-    dest = CuArray{Tuple{Float32,Int,STri}}(undef, size(rays))
-    blocks = length(rays) ÷ 256
-    @cuda threads = 256 blocks = blocks shmem = sizeof(STri) * 256 next_hit_kernel(
-        rays,
-        n_tris,
-        dest,
-        (Inf32, typemax(Int32), zeros(STri)),
-    )
-    synchronize()
+
+function next_hit(rays :: CuArray{ADRay}, n_tris :: CuArray{Tuple{I, T}}, override) where {I, T}
+    dest = CuArray{Tuple{Tuple{Float32, Float32}, I, T}}(undef, size(rays))
+    next_hit!(dest, rays, n_tris, override)
     return dest
 end
 
-function next_hit!(dest, rays, n_tris)
+function next_hit!(dest :: CuArray{Tuple{Tuple{Float32, Float32}, Int32, T}}, rays, n_tris:: AbstractArray{Tuple{I, T}}, override) where {I, T}
+    @assert length(rays) % 256 == 0
     blocks = length(rays) ÷ 256
-    @cuda threads = 256 blocks = blocks shmem = sizeof(STri) * 256 next_hit_kernel(
+    @cuda threads = 256 blocks = blocks shmem = (sizeof(I)+sizeof(T)) * 256 next_hit_kernel(
         rays,
         n_tris,
         dest,
-        (Inf32, typemax(Int32), zeros(STri)),
+        ((Inf32, Inf32), typemax(Int32), zeros(T)),
     )
-    synchronize()
     return dest
+    return nothing
 end
