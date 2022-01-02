@@ -135,14 +135,14 @@ function handle_optics(r, d, d′, n, N, n1 :: N1, n2::N2, rndm) where {N1, N2}
                      ForwardDiff.derivative(λ->p(r, d, d′, λ), r.λ),
                      refract(r.dir, N(r.λ), n1(r.λ), n2(r.λ)),
                      ForwardDiff.derivative(λ -> refract(r.dir + r.dir′ * (λ - r.λ), N(r.λ), n1(λ), n2(λ)), r.λ),
-                     in_medium, n, r.dest, r.λ, false)
+                     !r.in_medium, n, r.dest, r.λ, false)
 
     else
         return ADRay(p(r, d, d′, r.λ),
                      ForwardDiff.derivative(λ->p(r, d, d′, λ), r.λ),
                      reflect(r.dir, N(r.λ)),
                      ForwardDiff.derivative(λ -> reflect(r.dir + r.dir′ * (λ - r.λ), N(λ)), r.λ),
-                     in_medium, n, r.dest, r.λ, false)
+                     r.in_medium, n, r.dest, r.λ, false)
     end
 end
 

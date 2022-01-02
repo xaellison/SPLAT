@@ -55,8 +55,8 @@ function main()
             depth,
             ITERS,
             Float32(2 * pi / 10 * i / frame_n),
-            rand,
-            Array
+            CUDA.rand,
+            CuArray
         )
         for (sky_n, s) in enumerate(skys)
             Makie.save("out/menger_2/$(nameof(s))/$(lpad(i, 3, "0")).png", images[sky_n])
