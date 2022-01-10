@@ -32,8 +32,11 @@ abstract type AbstractRay end
 struct ADRay <: AbstractRay
     pos::V3
     pos′::V3
+    pos_x′::V3
     dir::V3
     dir′::V3
+    dir_x′::V3
+    dir_y′::V3
     in_medium::Bool
     ignore_tri::Int
     dest::Int
@@ -42,7 +45,7 @@ struct ADRay <: AbstractRay
 end
 
 function retired(ray::ADRay)
-    return ADRay(ray.pos, ray.pos′, ray.dir, ray.dir′,
+    return ADRay(ray.pos, ray.pos′, ray.pos_x′, ray.dir, ray.dir′,ray.dir_x′,ray.dir_y′,
                  ray.in_medium, ray.ignore_tri, ray.dest, ray.λ, true)
 end
 

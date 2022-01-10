@@ -64,82 +64,39 @@ end
 
 ## Ray evolvers
 
-function evolve_ray(r::Ray, d_n_t, rndm)::Ray
-    d, n, t = d_n_t
-    if isinf(d)
-        return r
-    end
-    p = r.pos + r.dir * d
-
-    n1, n2 = 1.0f0, glass(r.λ)
-    if r.in_medium
-        n2, n1 = n1, n2
-    end
-    N = optical_normal(t, p)
-
-    s_polarization = project(r.polarization, N)
-    p_polarization = r.polarization - s_polarization
-
-    if can_refract(r.dir, N, n1, n2)
-        # if we can reflect, scale probability between two polarizations
-        # NB T_p + R_p + T_s + T_p = 2
-        r_s = reflectance_s(r.dir, N, n1, n2)
-        r_p = reflectance_p(r.dir, N, n1, n2)
-        if rndm <= (1 - r_s) / 2.0f0
-            s_polarization = normalize(s_polarization)
-            return Ray(
-                p,
-                refract(r.dir, N, n1, n2),
-                s_polarization,
-                !r.in_medium,
-                n,
-                r.dest,
-                r.λ,
-            )
-        elseif rndm <= (2 - r_s - r_p) / 2.0f0
-            p_polarization = normalize(p_polarization)
-            return Ray(
-                p,
-                refract(r.dir, N, n1, n2),
-                p_polarization,
-                !r.in_medium,
-                n,
-                r.dest,
-                r.λ,
-            )
-        end
-    end
-    # NB this guard clause setup allows us to reflect if it is necessary (transmission = 0)
-    # or if it was simply selected probabalistically.
-    reflected_direction = reflect(r.dir, N)
-    reflected_polarization = normalize(cross(reflected_direction, p_polarization))
-    return Ray(p, reflected_direction, reflected_polarization, r.in_medium, n, r.dest, r.λ)
-
-end
-
-function p(r, d, d′, λ::N) where N
+function p(r, d, d′, λ::T1, x::T2, y::T3) where {T1, T2, T3}
     r.pos + # origin constant
     r.pos′ * (λ - r.λ) +  #origin linear
+    r.pos_x′ * x +
     (r.dir + # direction constant
-    r.dir′ * (λ - r.λ)) * # ... plus direction linear
+    r.dir′ * (λ - r.λ) +# ... plus direction linear
+    r.dir_x′ * x +
+    r.dir_y′ * y
+    ) *
     (d + d′ * (λ - r.λ)) # times constant + linear distance
 end
 
 function handle_optics(r, d, d′, n, N, n1 :: N1, n2::N2, rndm) where {N1, N2}
-    refracts = can_refract(r.dir, N(r.λ), n1(r.λ), n2(r.λ)) && rndm > reflectance(r.dir, N(r.λ), n1(r.λ), n2(r.λ))
+    refracts = can_refract(r.dir, N(r.λ, 0.0f0, 0.0f0), n1(r.λ), n2(r.λ)) && rndm > reflectance(r.dir, N(r.λ, 0.0f0,0.0f0), n1(r.λ), n2(r.λ))
 
     if refracts
-        return ADRay(p(r, d, d′, r.λ),
-                     ForwardDiff.derivative(λ->p(r, d, d′, λ), r.λ),
-                     refract(r.dir, N(r.λ), n1(r.λ), n2(r.λ)),
-                     ForwardDiff.derivative(λ -> refract(r.dir + r.dir′ * (λ - r.λ), N(r.λ), n1(λ), n2(λ)), r.λ),
+        return ADRay(p(r, d, d′, r.λ, 0.0f0, 0.0f0),
+                     ForwardDiff.derivative(λ->p(r, d, d′, λ, 0.0f0, 0.0f0), r.λ),
+                     ForwardDiff.derivative(δx->p(r, d, d′, r.λ, δx, 0.0f0), 0.0f0),
+                     refract(r.dir, N(r.λ, 0.0f0, 0.0f0), n1(r.λ), n2(r.λ)),
+                     ForwardDiff.derivative(λ -> refract(r.dir + r.dir′ * (λ - r.λ), N(r.λ, 0.0f0, 0.0f0), n1(λ), n2(λ)), r.λ),
+                     ForwardDiff.derivative(δx -> refract(r.dir + (r.dir_x′) * δx, N(r.λ, δx, 0.0f0), n1(r.λ), n2(r.λ)), 0.0f0),
+                     ForwardDiff.derivative(δy -> refract(r.dir + (r.dir_y′) * δy, N(r.λ, 0.0f0, δy), n1(r.λ), n2(r.λ)), 0.0f0),
                      !r.in_medium, n, r.dest, r.λ, false)
 
     else
-        return ADRay(p(r, d, d′, r.λ),
-                     ForwardDiff.derivative(λ->p(r, d, d′, λ), r.λ),
-                     reflect(r.dir, N(r.λ)),
-                     ForwardDiff.derivative(λ -> reflect(r.dir + r.dir′ * (λ - r.λ), N(λ)), r.λ),
+        return ADRay(p(r, d, d′, r.λ, 0.0f0, 0.0f0),
+                     ForwardDiff.derivative(λ->p(r, d, d′, λ, 0.0f0, 0.0f0), r.λ),
+                     ForwardDiff.derivative(δx->p(r, d, d′, r.λ, δx, 0.0f0), 0.0f0),
+                     reflect(r.dir, N(r.λ,0.0f0,0.0f0)),
+                     ForwardDiff.derivative(λ -> reflect(r.dir + r.dir′ * (λ - r.λ), N(λ, 0.0f0, 0.0f0)), r.λ),
+                     ForwardDiff.derivative(δx -> reflect(r.dir + r.dir_x′ * δx, N(r.λ, δx, 0.0f0)), 0.0f0),
+                     ForwardDiff.derivative(δy -> reflect(r.dir + r.dir_y′ * δy, N(r.λ, 0.0f0, δy)), 0.0f0),
                      r.in_medium, n, r.dest, r.λ, false)
     end
 end
@@ -154,7 +111,7 @@ function evolve_ray(r::ADRay, d_n_t :: Tuple{Tuple{R, R}, I, T}, rndm)::ADRay wh
     end
 
 
-    N(λ) = optical_normal(t, p(r, d, d′, λ))
+    N(λ, x, y) = optical_normal(t, p(r, d, d′, λ, x, y))
     if r.in_medium
         return handle_optics(r, d, d′, n, N, glass, air, rndm)
     else
@@ -183,7 +140,7 @@ function ad_frame_matrix(
     #out .= RGBf(0, 0, 0)
     λ_min = 400.0f0
     λ_max = 700.0f0
-    intensity = Float32(1 / ITERS) * 2
+    intensity = Float32(1 / ITERS) #*0.5
 
     function init_ray(x, y, λ, dv)::AbstractRay
         _x, _y = x - width / 2, y - height / 2
@@ -197,10 +154,11 @@ function ad_frame_matrix(
             _y * camera.up +
             _z * camera.dir +
             dv * 0.25f0 / max(width, height)
-        dir = normalize(dir)
         idx = (x - 1) * height + y
         polarization = normalize(cross(camera.up, dir))
-        return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 0, idx, λ, false)
+        x̂ = cross(dir, camera.up) |> normalize
+        ŷ = cross(dir, x̂) |> normalize
+        return ADRay(camera.pos , zero(V3),zero(V3), dir, zero(V3),x̂,ŷ, false, 0, idx, λ, false)
     end
 
     I = map(Int32, collect(1:length(tris)))
@@ -218,6 +176,7 @@ function ad_frame_matrix(
     s0 = nothing
     #@showprogress for (iter, λ) in [(iter, λ) for iter = 1:ITERS for λ = λ_min:dλ:λ_max]
     @info "tracing depth = $depth"
+    ray_iters = []
     @time for iter = 1:ITERS
 
         if has_run
@@ -243,7 +202,7 @@ function ad_frame_matrix(
         if has_run
             next_hit!(hits, rays, n_tris, false)
         else
-            CUDA.@time CUDA.@sync hits = next_hit(rays, n_tris, true)
+            hits = next_hit(rays, n_tris, true)
         end
         #
         for iter = 2:depth
@@ -259,11 +218,12 @@ function ad_frame_matrix(
             #end
             h_view = @view hits[1:cutoff]
             r_view = @view rays[1:cutoff]
-            CUDA.@time CUDA.@sync next_hit!(h_view, r_view, n_tris, false)
+            next_hit!(h_view, r_view, n_tris, false)
         end
         rndm .= random(Float32, width * height)
         map!(evolve_ray, rays, rays, hits, rndm)
         has_run = true
+        push!(ray_iters, copy(rays))
     end
 
     frame_n = 180
@@ -278,24 +238,26 @@ function ad_frame_matrix(
         for λ in λ_min:dλ:λ_max
             r0, g0, b0 = retina_red(λ), retina_green(λ), retina_blue(λ)
             for (i, sky) in enumerate(skys)
-                # WARNING deleted `r.in_medium ? 0.0f0 : `
-                g = r -> sky(r.dir + r.dir′ * (λ - r.λ), λ, Float32(2 * pi / 20 * frame_i / frame_n))
+                for rays in ray_iters
+                    # WARNING deleted `r.in_medium ? 0.0f0 : `
+                    g = r -> r.in_medium ? 0.0f0 : sky(r.dir + r.dir′ * (λ - r.λ), λ, Float32(2 * pi / 20 * frame_i / frame_n)) * norm(r.dir_x′) / (norm(r.pos_x′))
 
-                if isnothing(I)
-                    I = map(r->r.dest, rays)
-                else
-                    map!(r->r.dest, I, rays)
+                    if isnothing(I)
+                        I = map(r->r.dest, rays)
+                    else
+                        map!(r->r.dest, I, rays)
+                    end
+
+                    if isnothing(s0)
+                        s0 = g.(rays)
+                    else
+                        map!(g, s0, rays)
+                    end
+                    @assert length(ray_iters ) == ITERS
+                    R[I] .+= intensity * s0 * r0 * dλ
+                    G[I] .+= intensity * s0 * g0 * dλ
+                    B[I] .+= intensity * s0 * b0 * dλ
                 end
-
-                if isnothing(s0)
-                    s0 = g.(rays)
-                else
-                    map!(g, s0, rays)
-                end
-
-                R[I] .+= intensity * s0 * r0 * dλ
-                G[I] .+= intensity * s0 * g0 * dλ
-                B[I] .+= intensity * s0 * b0 * dλ
             end
         end
 

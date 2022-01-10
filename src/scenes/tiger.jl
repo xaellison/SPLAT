@@ -15,8 +15,8 @@ function main()
 	println(model_box(tris))
     #tris = parse_obj(obj_path)
     @info "$(length(tris)) triangles"
-    width = 256
-    height = 256#Int(width * 3 / 4)
+    width = 1024
+    height = 1024#Int(width * 3 / 4)
     frame_n = 720
 
 	function moving_camera(frame_i, frame_n)
@@ -28,7 +28,7 @@ function main()
 		return get_camera(camera_pos, look_at, up, FOV)
 	end
 
-    depth = 3
+    depth = 7
     dλ = 10
     ITERS = 1
 
