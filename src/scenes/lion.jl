@@ -7,7 +7,7 @@ include("../tracer.jl")
 include("../cuda.jl")
 function main()
 
-    obj_path = "objs/targetted_backless.obj"
+    obj_path = "objs/lion_head_2.obj"
     tris = mesh_to_STri(load(obj_path))
 
 	centroid = _centroid(tris)
@@ -15,12 +15,12 @@ function main()
 	println(model_box(tris))
     #tris = parse_obj(obj_path)
     @info "$(length(tris)) triangles"
-    width = 512
-    height = 512#Int(width * 3 / 4)
+    width = 1024
+    height = 1024#Int(width * 3 / 4)
     frame_n = 720
 
 	function moving_camera(frame_i, frame_n)
-		camera_pos = V3((60, 0, 0))
+		camera_pos = V3((50, 0, 0))
 		look_at = zero(V3)
 		up = V3((0.0, 0.0, -1.0))
 		FOV =  45.0 * pi / 180.0
@@ -28,11 +28,11 @@ function main()
 		return get_camera(camera_pos, look_at, up, FOV)
 	end
 
-    depth = 4
+    depth = 6
     dλ = 10
     ITERS = 1
 
-    skys = [sky_stripes_down]
+    skys = sky_rings
 
     #for i = 1:frame_n
 		# R0 gets corner up

@@ -32,7 +32,7 @@ function main()
     dλ = 10
     ITERS = 1
 
-    skys = [sky_stripes_down]
+    skys = sky_rings
 
     #for i = 1:frame_n
 		# R0 gets corner up

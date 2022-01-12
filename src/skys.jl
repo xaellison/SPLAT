@@ -90,3 +90,8 @@ function sky_stripes_down(dir :: AbstractArray{T}, λ::T, phi::T)::T where T
 	end
 	return 0.0
 end
+
+function shade(r :: ADRay, sky :: S, λ, ϕ) :: Float32 where S
+
+	r.in_medium ? 0.0f0 : sky(r.dir + r.dir′ * (λ - r.λ), λ, ϕ) * norm(cross(normalize(r.dir_x′), normalize(r.dir_y′)))# abs(dot(cross(r.dir_x′, r.dir_y′), normalize(r.last_normal)))
+end

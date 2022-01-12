@@ -24,7 +24,10 @@ function next_hit_kernel(rays, tris :: AbstractArray{T}, dest, default) where T
             d(λ) = distance_to_plane(r.pos + r.pos′ * (λ - r.λ), r.dir + r.dir′ * (λ - r.λ), t[2], t[1])
             p = r.pos + r.dir * d0
             if in_triangle(p, t[2], t[3], t[4]) && min_val > d0 > 0 && r.ignore_tri != n
-                arg_min = ((d0, ForwardDiff.derivative(d, r.λ)), n, t)
+                arg_min = ((d0,
+                        ForwardDiff.derivative(λ->distance_to_plane(r.pos + r.pos′ * (λ - r.λ), r.dir + r.dir′ * (λ - r.λ), t[2], t[1]), r.λ),
+                        ForwardDiff.derivative(x->distance_to_plane(r.pos , r.dir + r.dir_x′ * x, t[2], t[1]), 0.0f0),
+                        ForwardDiff.derivative(y->distance_to_plane(r.pos , r.dir + r.dir_y′ * y, t[2], t[1]), 0.0f0),), n, t)
                 min_val = d0
             end
             ####
@@ -39,19 +42,19 @@ end
 
 
 function next_hit(rays :: CuArray{ADRay}, n_tris :: CuArray{Tuple{I, T}}, override) where {I, T}
-    dest = CuArray{Tuple{Tuple{Float32, Float32}, I, T}}(undef, size(rays))
+    dest = CuArray{Tuple{Tuple{Float32, Float32, Float32, Float32}, I, T}}(undef, size(rays))
     next_hit!(dest, rays, n_tris, override)
     return dest
 end
 
-function next_hit!(dest :: CuArray{Tuple{Tuple{Float32, Float32}, Int32, T}}, rays, n_tris:: AbstractArray{Tuple{I, T}}, override) where {I, T}
+function next_hit!(dest :: CuArray{Tuple{Tuple{Float32, Float32, Float32, Float32}, Int32, T}}, rays, n_tris:: AbstractArray{Tuple{I, T}}, override) where {I, T}
     @assert length(rays) % 256 == 0
     blocks = length(rays) ÷ 256
     @cuda threads = 256 blocks = blocks shmem = (sizeof(I)+sizeof(T)) * 256 next_hit_kernel(
         rays,
         n_tris,
         dest,
-        ((Inf32, Inf32), typemax(Int32), zeros(T)),
+        ((Inf32, Inf32, Inf32, Inf32), typemax(Int32), zeros(T)),
     )
     return dest
     return nothing

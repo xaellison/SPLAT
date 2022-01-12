@@ -11,7 +11,6 @@ import Base: rand, typemax, isless, one, zero
 
 const V3 = SVector{3,Float32}
 const INVALID_V3 = SVector(Inf, Inf, Inf)
-const _COS_45 = 1 / sqrt(2)
 
 # element 1 is normal
 const Tri = SVector{4,V3}
@@ -33,6 +32,7 @@ struct ADRay <: AbstractRay
     pos::V3
     pos′::V3
     pos_x′::V3
+    pos_y′::V3
     dir::V3
     dir′::V3
     dir_x′::V3
@@ -41,12 +41,17 @@ struct ADRay <: AbstractRay
     ignore_tri::Int
     dest::Int
     λ::Float32
+    last_normal::V3
     retired::Bool
 end
 
+function get_dest(ray :: AbstractRay) :: Int
+    return ray.dest
+end
+
 function retired(ray::ADRay)
-    return ADRay(ray.pos, ray.pos′, ray.pos_x′, ray.dir, ray.dir′,ray.dir_x′,ray.dir_y′,
-                 ray.in_medium, ray.ignore_tri, ray.dest, ray.λ, true)
+    return ADRay(ray.pos, ray.pos′, ray.pos_x′, ray.pos_y′, ray.dir, ray.dir′,ray.dir_x′,ray.dir_y′,
+                 ray.in_medium, ray.ignore_tri, ray.dest, ray.λ, ray.last_normal, true)
 end
 
 struct Ray <: AbstractRay
@@ -312,6 +317,7 @@ end
     normal)
     normal = normalize(normal)
     dist = (dot(normal, plane_point) - dot(normal, origin)) / dot(normal, dir)
+    dist
 end
 
 function same_side(p1, p2, _a, _b)
