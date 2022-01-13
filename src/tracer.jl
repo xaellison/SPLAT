@@ -17,31 +17,26 @@ function get_hit(n_t::Tuple{Int32,T}, r::AbstractRay)::Tuple{Float32,Int32,T} wh
     end
 end
 
-function get_hit(n_t::Tuple{Int32,T}, r::ADRay)::Tuple{Tuple{Float32,Float32},Int32,T} where {T}
+function get_hit(n_t::Tuple{Int32,T}, r::ADRay)::Tuple{Float32,Int32,T} where {T}
     n, t = n_t
     d0 = distance_to_plane(r.pos, r.dir, t[2], t[1])
-    d(λ, x, y) = distance_to_plane(r.pos + r.pos′ * (λ - r.λ), r.dir + r.dir′ * (λ - r.λ) + r.dir_x′ * x + r.dir_y′*y, t[2], t[1])
     p = r.pos + r.dir * d0
     if in_triangle(p, t[2], t[3], t[4]) && d0 > 0 && r.ignore_tri != n
-        return ((d0,
-                ForwardDiff.derivative(distance_to_plane(r.pos + r.pos′ * (λ - r.λ), r.dir + r.dir′ * (λ - r.λ), t[2], t[1]), r.λ),
-                ForwardDiff.derivative(distance_to_plane(r.pos , r.dir + r.dir_x′ * x, t[2], t[1]), 0.0f0),
-                ForwardDiff.derivative(distance_to_plane(r.pos , r.dir + r.dir_y′ * y, t[2], t[1]), 0.0f0),
-                ), n, t)
+        return (d0, n, t)
     else
-        return ((Inf32, Inf32), n, t)
+        return (Inf32, n, t)
     end
 end
 
 ## !! Hit computers for AD and non-AD Rays
 
-function next_hit(rays :: AbstractArray{R}, n_tris :: AbstractArray{Tuple{I, T}}) where {R<:AbstractRay, I, T}
+function next_hit(rays :: AbstractArray{R}, n_tris :: AbstractArray{Tuple{I, T}}, override) where {R<:AbstractRay, I, T}
     dest = Array{Tuple{Float32, Int32, T}}(undef, size(rays))
     next_hit!(dest, rays, n_tris)
     return dest
 end
 
-function next_hit!(dest :: Array{Tuple{Float32, Int32, T}}, rays, n_tris:: AbstractArray{Tuple{I, T}}) where {I, T}
+function next_hit!(dest :: Array{Tuple{Float32, Int32, T}}, rays, n_tris:: AbstractArray{Tuple{I, T}}, override) where {I, T}
     @simd for i in 1:length(dest)
         dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i]), n_tris, init=(Inf32, typemax(Int32), zero(T)))
     end
@@ -50,7 +45,7 @@ end
 
 
 function next_hit(rays :: AbstractArray{ADRay}, n_tris :: AbstractArray{Tuple{I, T}}, override) where {I, T}
-    dest = Array{Tuple{Tuple{Float32, Float32, Float32, Float32}, Int32, T}}(undef, size(rays))
+    dest = Array{Tuple{Float32, Int32, T}}(undef, size(rays))
     next_hit!(dest, rays, n_tris, override)
     return dest
 end
@@ -69,21 +64,7 @@ end
 ## Ray evolvers
 
 function p(r, t, λ::T1, x::T2, y::T3) where {T1, T2, T3}
-    r.pos + # origin constant
-    r.pos′ * (λ - r.λ) +  #origin linear
-    r.pos_x′ * x +
-    r.pos_y′ * y +
-    (r.dir + # direction constant
-    r.dir′ * (λ - r.λ) +# ... plus direction linear
-    r.dir_x′ * x +
-    r.dir_y′ * y
-    ) * distance_to_plane(r.pos+ # origin constant
-    r.pos′ * (λ - r.λ) +  #origin linear
-    r.pos_x′ * x +
-    r.pos_y′ * y , r.dir + # direction constant
-    r.dir′ * (λ - r.λ) +# ... plus direction linear
-    r.dir_x′ * x +
-    r.dir_y′ * y, t[2], t[1])
+    ray_pos(r, λ, x, y) + ray_dir(r, λ, x, y) * distance_to_plane(ray_pos(r, λ, x, y), ray_dir(r, λ, x, y), t[2], t[1])
 end
 
 function handle_optics(r,  n, t, N, n1 :: N1, n2::N2, rndm) where {N1, N2}
@@ -95,9 +76,11 @@ function handle_optics(r,  n, t, N, n1 :: N1, n2::N2, rndm) where {N1, N2}
                      ForwardDiff.derivative(δx->p(r, t, r.λ, δx, 0.0f0), 0.0f0),
                      ForwardDiff.derivative(δy->p(r, t, r.λ, 0.0f0, δy), 0.0f0),
                      refract(r.dir, N(r.λ, 0.0f0, 0.0f0), n1(r.λ), n2(r.λ)),
-                     ForwardDiff.derivative(λ -> refract(r.dir + r.dir′ * (λ - r.λ), N(λ, 0.0f0, 0.0f0), n1(λ), n2(λ)), r.λ),
-                     ForwardDiff.derivative(δx -> refract(r.dir + r.dir_x′ * δx, optical_normal(t, p(r, t, r.λ, δx, 0.0f0)), n1(r.λ), n2(r.λ)), 0.0f0),
-                     ForwardDiff.derivative(δy -> refract(r.dir + r.dir_y′ * δy, optical_normal(t, p(r, t, r.λ, 0.0f0, δy)), n1(r.λ), n2(r.λ)), 0.0f0),
+                     # Should I also remove normal from λ derivative?
+                     ForwardDiff.derivative(λ -> refract(ray_dir(r, λ, 0.0f0, 0.0f0), N(λ, 0.0f0, 0.0f0), n1(λ), n2(λ)), r.λ),
+                     # This is really baffling, but including the interpolated normal in derivative the output has
+                     ForwardDiff.derivative(δx -> refract(ray_dir(r, 0.0f0, δx, 0.0f0), N(0.0f0, 0.0f0, 0.0f0), n1(r.λ), n2(r.λ)), 0.0f0),
+                     ForwardDiff.derivative(δy -> refract(ray_dir(r, 0.0f0, 0.0f0, δy), N(0.0f0, 0.0f0, 0.0f0), n1(r.λ), n2(r.λ)), 0.0f0),
                      !r.in_medium, n, r.dest, r.λ, N(r.λ,0.0f0,0.0f0), false)
 
     else
@@ -107,14 +90,14 @@ function handle_optics(r,  n, t, N, n1 :: N1, n2::N2, rndm) where {N1, N2}
                      ForwardDiff.derivative(δy->p(r, t, r.λ, 0.0f0, δy), 0.0f0),
                      reflect(r.dir, N(r.λ,0.0f0,0.0f0)),
                      ForwardDiff.derivative(λ -> reflect(r.dir + r.dir′ * (λ - r.λ), N(λ, 0.0f0, 0.0f0)), r.λ),
-                     ForwardDiff.derivative(δx -> reflect(r.dir + r.dir_x′ * δx, N(r.λ, δx, 0.0f0)), 0.0f0),
-                     ForwardDiff.derivative(δy -> reflect(r.dir + r.dir_y′ * δy, N(r.λ, 0.0f0, δy)), 0.0f0),
+                     ForwardDiff.derivative(δx -> reflect(r.dir + r.dir_x′ * δx, N(0.0f0, 0.0f0, 0.0f0)), 0.0f0),
+                     ForwardDiff.derivative(δy -> reflect(r.dir + r.dir_y′ * δy, N(0.0f0, 0.0f0, 0.0f0)), 0.0f0),
                      r.in_medium, n, r.dest, r.λ, N(r.λ,0.0f0,0.0f0), false)
     end
 end
 
-function evolve_ray(r::ADRay, d_n_t :: Tuple{Tuple{R, R, R, R}, I, T}, rndm)::ADRay where {R<:Real, I<:Integer, T}
-    (d, d′, d_x′, d_y′), n, t = d_n_t
+function evolve_ray(r::ADRay, d_n_t :: Tuple{R, I, T}, rndm)::ADRay where {R<:Real, I<:Integer, T}
+    d, n, t = d_n_t
     if r.retired
         return r
     end
@@ -158,7 +141,7 @@ function ad_frame_matrix(
     A, # type: either Array or CuArray
 ) where S
     camera = camera_generator(1, 1)
-    CUDA.memory_status()
+    #CUDA.memory_status()
     #out .= RGBf(0, 0, 0)
     λ_min = 400.0f0
     λ_max = 700.0f0
@@ -217,6 +200,8 @@ function ad_frame_matrix(
             rays = reshape(init_ray.(row_indices, col_indices, 550.0, dv), width * height)
         end
 
+        intensity = Float32(length(rays) / sum(map(solid_angle_intensity, rays)) * Float32(1 / ITERS))
+
         rndm .= random(Float32, length(rays))
         if has_run
             next_hit!(hits, rays, n_tris, false)
@@ -225,7 +210,7 @@ function ad_frame_matrix(
         end
         #
         for iter = 2:depth
-            CUDA.memory_status()
+            #CUDA.memory_status()
             rndm .= random(Float32, length(rays))
             #map!(d_r -> d_r[2], rays, hits)
             println(eltype(hits))
@@ -239,7 +224,7 @@ function ad_frame_matrix(
             #end
             h_view = @view hits[1:cutoff]
             r_view = @view rays[1:cutoff]
-            next_hit!(h_view, r_view, n_tris, false)
+            next_hit!(hits, rays, n_tris, false)
         end
         rndm .= random(Float32, width * height)
         map!(evolve_ray, rays, rays, hits, rndm)
@@ -247,15 +232,15 @@ function ad_frame_matrix(
         push!(ray_iters, copy(rays))
     end
     @info "syncing..."
-    CUDA.synchronize()
+    #CUDA.synchronize()
     @info "sync'ed"
-    frame_n = 8
+    frame_n = 32
     @info "images"
-    CUDA.memory_status()
-    R = CUDA.zeros(Float32, height, width)
+    #CUDA.memory_status()
+    R = zeros(Float32, height, width)
 
-    G = CUDA.zeros(Float32, height, width)
-    B = CUDA.zeros(Float32, height, width)
+    G = zeros(Float32, height, width)
+    B = zeros(Float32, height, width)
 
     I_s = []
     for rays in ray_iters
@@ -311,7 +296,7 @@ function ad_frame_matrix(
             end
         end
 
-        Makie.save("out/lion/_/$(lpad(frame_i, 3, "0")).png", img)
+        Makie.save("out/sphere/_/$(lpad(frame_i, 3, "0")).png", img)
     #    print(Array(map(r->r.last_normal|>norm, rays)))
     end
     return nothing

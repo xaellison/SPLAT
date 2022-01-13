@@ -45,6 +45,14 @@ struct ADRay <: AbstractRay
     retired::Bool
 end
 
+function ray_pos(ray, λ, x, y)
+    ray.pos + ray.pos′ * (λ - ray.λ) + ray.pos_x′ * x + ray.pos_y′ * y
+end
+
+function ray_dir(ray, λ, x, y)
+    ray.dir + ray.dir′ * (λ - ray.λ) + ray.dir_x′ * x + ray.dir_y′ * y
+end
+
 function get_dest(ray :: AbstractRay) :: Int
     return ray.dest
 end

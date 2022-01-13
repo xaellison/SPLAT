@@ -91,7 +91,14 @@ function sky_stripes_down(dir :: AbstractArray{T}, λ::T, phi::T)::T where T
 	return 0.0
 end
 
-function shade(r :: ADRay, sky :: S, λ, ϕ) :: Float32 where S
+function solid_angle_intensity(r :: ADRay)
+	if norm(r.pos_x′) == 0 || norm(r.pos_y′) ==0
+#		return 1.0f0
+	end
+	return norm(cross(r.dir_x′, r.dir_y′)) ^ 0.25 #* norm(cross(r.pos_x′, r.pos_y′))
+	#cbrt(abs(dot(cross(r.dir_x′, r.dir_y′),  cross(r.pos_x′, r.pos_y′))))
+end
 
-	r.in_medium ? 0.0f0 : sky(r.dir + r.dir′ * (λ - r.λ), λ, ϕ) * norm(cross(normalize(r.dir_x′), normalize(r.dir_y′)))# abs(dot(cross(r.dir_x′, r.dir_y′), normalize(r.last_normal)))
+function shade(r :: ADRay, sky :: S, λ, ϕ) :: Float32 where S
+	r.in_medium ? 0.0f0 : sky(ray_dir(ray, λ, 0.0f0, 0.0f0), λ, ϕ) * solid_angle_intensity(r)
 end

@@ -4,10 +4,10 @@
 include("../geo.jl")
 include("../skys.jl")
 include("../tracer.jl")
-include("../cuda.jl")
+#include("../cuda.jl")
 function main()
 
-    obj_path = "objs/sphere_2.obj"
+    obj_path = "objs/sphere.obj"
     tris = mesh_to_STri(load(obj_path))
 
 	centroid = _centroid(tris)
@@ -20,7 +20,7 @@ function main()
     frame_n = 720
 
 	function moving_camera(frame_i, frame_n)
-		camera_pos = V3((5, 0, 0))
+		camera_pos = V3((5, 0, 0))+rand(V3)*0.001
 		look_at = zero(V3)
 		up = V3((0.0, 0.0, -1.0))
 		FOV =  45.0 * pi / 180.0
@@ -28,9 +28,9 @@ function main()
 		return get_camera(camera_pos, look_at, up, FOV)
 	end
 
-    depth = 4
+    depth = 5
     dλ = 10
-    ITERS = 1
+    ITERS = 16
 
     skys = sky_rings
 
@@ -56,8 +56,8 @@ function main()
             depth,
             ITERS,
             0,
-            CUDA.rand,
-            CuArray
+            rand,
+            Array
         )
 
     println("~fin")
