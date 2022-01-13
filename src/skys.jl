@@ -100,5 +100,5 @@ function solid_angle_intensity(r :: ADRay)
 end
 
 function shade(r :: ADRay, sky :: S, λ, ϕ) :: Float32 where S
-	r.in_medium ? 0.0f0 : sky(ray_dir(ray, λ, 0.0f0, 0.0f0), λ, ϕ) * solid_angle_intensity(r)
+	r.in_medium ? 0.0f0 : sky(ray_dir(r, λ, 0.0f0, 0.0f0), λ, ϕ) * solid_angle_intensity(r)
 end

@@ -79,8 +79,8 @@ function handle_optics(r,  n, t, N, n1 :: N1, n2::N2, rndm) where {N1, N2}
                      # Should I also remove normal from λ derivative?
                      ForwardDiff.derivative(λ -> refract(ray_dir(r, λ, 0.0f0, 0.0f0), N(λ, 0.0f0, 0.0f0), n1(λ), n2(λ)), r.λ),
                      # This is really baffling, but including the interpolated normal in derivative the output has
-                     ForwardDiff.derivative(δx -> refract(ray_dir(r, 0.0f0, δx, 0.0f0), N(0.0f0, 0.0f0, 0.0f0), n1(r.λ), n2(r.λ)), 0.0f0),
-                     ForwardDiff.derivative(δy -> refract(ray_dir(r, 0.0f0, 0.0f0, δy), N(0.0f0, 0.0f0, 0.0f0), n1(r.λ), n2(r.λ)), 0.0f0),
+                     ForwardDiff.derivative(δx -> refract(ray_dir(r, 0.0f0, δx, 0.0f0), N(r.λ, 0.0f0, 0.0f0), n1(r.λ), n2(r.λ)), 0.0f0),
+                     ForwardDiff.derivative(δy -> refract(ray_dir(r, 0.0f0, 0.0f0, δy), N(r.λ, 0.0f0, 0.0f0), n1(r.λ), n2(r.λ)), 0.0f0),
                      !r.in_medium, n, r.dest, r.λ, N(r.λ,0.0f0,0.0f0), false)
 
     else
@@ -90,8 +90,8 @@ function handle_optics(r,  n, t, N, n1 :: N1, n2::N2, rndm) where {N1, N2}
                      ForwardDiff.derivative(δy->p(r, t, r.λ, 0.0f0, δy), 0.0f0),
                      reflect(r.dir, N(r.λ,0.0f0,0.0f0)),
                      ForwardDiff.derivative(λ -> reflect(r.dir + r.dir′ * (λ - r.λ), N(λ, 0.0f0, 0.0f0)), r.λ),
-                     ForwardDiff.derivative(δx -> reflect(r.dir + r.dir_x′ * δx, N(0.0f0, 0.0f0, 0.0f0)), 0.0f0),
-                     ForwardDiff.derivative(δy -> reflect(r.dir + r.dir_y′ * δy, N(0.0f0, 0.0f0, 0.0f0)), 0.0f0),
+                     ForwardDiff.derivative(δx -> reflect(r.dir + r.dir_x′ * δx, N(r.λ, 0.0f0, 0.0f0)), 0.0f0),
+                     ForwardDiff.derivative(δy -> reflect(r.dir + r.dir_y′ * δy, N(r.λ, 0.0f0, 0.0f0)), 0.0f0),
                      r.in_medium, n, r.dest, r.λ, N(r.λ,0.0f0,0.0f0), false)
     end
 end
