@@ -91,16 +91,27 @@ function sky_stripes_down(dir :: AbstractArray{T}, λ::T, phi::T)::T where T
 	return 0.0
 end
 
-function solid_angle_intensity(r :: ADRay)
-	if norm(r.pos_x′) == 0 || norm(r.pos_y′) ==0
-#		return 1.0f0
-	end
-	return norm(cross(r.dir_x′, r.dir_y′)) ^ 0.25 #* norm(cross(r.pos_x′, r.pos_y′))
-	#cbrt(abs(dot(cross(r.dir_x′, r.dir_y′),  cross(r.pos_x′, r.pos_y′))))
+function solid_angle_intensity(r :: ADRay) :: Float32
+	"""
+	Find the real hit pos, get the interpolated normal
+	treat as new triangle with actual normal the interpolated
+	"""
+
+
+	T = STri(r.last_normal,
+			 r.pos,
+			 r.pos + cross(r.last_normal, V3(1,0,0)),
+			 r.pos + cross(r.last_normal, cross(r.last_normal, V3(1,0,0))),
+			 r.last_normal, r.last_normal, r.last_normal)
+	dx = ForwardDiff.derivative(x->p(r, T, r.λ, x, 0.0f0), 0.0f0)
+	dy = ForwardDiff.derivative(y->p(r, T, r.λ, 0.0f0, y), 0.0f0)
+
+	norm(cross(dx, dy))
+
 end
 
 function shade(r :: ADRay, sky :: S, λ, ϕ) :: Float32 where S
-	r.in_medium ? 0.0f0 : sky(ray_dir(r, λ, 0.0f0, 0.0f0), λ, ϕ) * solid_angle_intensity(r)
+	r.in_medium ? 0.0f0 : 0.5f0 * solid_angle_intensity(r) * 1e-2
 end
 
 """
@@ -111,4 +122,14 @@ The brightness is based on a derivative of direction. For shading to be "smooth"
 An arc of ray's direction is continuous but not smooth due to a finite mesh.
 The derivative of that direction is then not guaranteed to be continuous, hence the
 color suddenly "jumps" at mesh edges.
+
+This is also a good time to note I've been wrong by estimating radiance inbound
+as a function of the derivative of direction. Rather, it should be of position,
+the effective area absorbing even if only from one direction (etendre). Direction
+may not suffer the differentiability problem, but position most certainly does.
+
+Find the real hit pos, get the interpolated normal
+treat as new triangle with actual normal the interpolated
+
+I thought this would be clever but not enough
 """

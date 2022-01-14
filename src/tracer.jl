@@ -68,7 +68,7 @@ function p(r, t, λ::T1, x::T2, y::T3) where {T1, T2, T3}
 end
 
 function handle_optics(r,  n, t, N, n1 :: N1, n2::N2, rndm) where {N1, N2}
-    refracts = can_refract(r.dir, N(r.λ, 0.0f0, 0.0f0), n1(r.λ), n2(r.λ)) && rndm > reflectance(r.dir, N(r.λ, 0.0f0,0.0f0), n1(r.λ), n2(r.λ))
+    refracts = false# can_refract(r.dir, N(r.λ, 0.0f0, 0.0f0), n1(r.λ), n2(r.λ)) && rndm > reflectance(r.dir, N(r.λ, 0.0f0,0.0f0), n1(r.λ), n2(r.λ))
 
     if refracts
         return ADRay(p(r, t, r.λ, 0.0f0, 0.0f0),
@@ -200,7 +200,7 @@ function ad_frame_matrix(
             rays = reshape(init_ray.(row_indices, col_indices, 550.0, dv), width * height)
         end
 
-    
+
         rndm .= random(Float32, length(rays))
         if has_run
             next_hit!(hits, rays, n_tris, false)
