@@ -79,8 +79,8 @@ function handle_optics(r,  n, t, N, n1 :: N1, n2::N2, rndm) where {N1, N2}
                      # Should I also remove normal from λ derivative?
                      ForwardDiff.derivative(λ -> refract(ray_dir(r, λ, 0.0f0, 0.0f0), N(λ, 0.0f0, 0.0f0), n1(λ), n2(λ)), r.λ),
                      # This is really baffling, but including the interpolated normal in derivative the output has
-                     ForwardDiff.derivative(δx -> refract(ray_dir(r, 0.0f0, δx, 0.0f0), N(r.λ, 0.0f0, 0.0f0), n1(r.λ), n2(r.λ)), 0.0f0),
-                     ForwardDiff.derivative(δy -> refract(ray_dir(r, 0.0f0, 0.0f0, δy), N(r.λ, 0.0f0, 0.0f0), n1(r.λ), n2(r.λ)), 0.0f0),
+                     ForwardDiff.derivative(δx -> refract(ray_dir(r, 0.0f0, δx, 0.0f0), N(r.λ, δx, 0.0f0), n1(r.λ), n2(r.λ)), 0.0f0),
+                     ForwardDiff.derivative(δy -> refract(ray_dir(r, 0.0f0, 0.0f0, δy), N(r.λ, 0.0f0, δy), n1(r.λ), n2(r.λ)), 0.0f0),
                      !r.in_medium, n, r.dest, r.λ, N(r.λ,0.0f0,0.0f0), false)
 
     else
@@ -90,8 +90,8 @@ function handle_optics(r,  n, t, N, n1 :: N1, n2::N2, rndm) where {N1, N2}
                      ForwardDiff.derivative(δy->p(r, t, r.λ, 0.0f0, δy), 0.0f0),
                      reflect(r.dir, N(r.λ,0.0f0,0.0f0)),
                      ForwardDiff.derivative(λ -> reflect(r.dir + r.dir′ * (λ - r.λ), N(λ, 0.0f0, 0.0f0)), r.λ),
-                     ForwardDiff.derivative(δx -> reflect(r.dir + r.dir_x′ * δx, N(r.λ, 0.0f0, 0.0f0)), 0.0f0),
-                     ForwardDiff.derivative(δy -> reflect(r.dir + r.dir_y′ * δy, N(r.λ, 0.0f0, 0.0f0)), 0.0f0),
+                     ForwardDiff.derivative(δx -> reflect(r.dir + r.dir_x′ * δx, N(r.λ, δx, 0.0f0)), 0.0f0),
+                     ForwardDiff.derivative(δy -> reflect(r.dir + r.dir_y′ * δy, N(r.λ, 0.0f0, δy)), 0.0f0),
                      r.in_medium, n, r.dest, r.λ, N(r.λ,0.0f0,0.0f0), false)
     end
 end
@@ -200,8 +200,7 @@ function ad_frame_matrix(
             rays = reshape(init_ray.(row_indices, col_indices, 550.0, dv), width * height)
         end
 
-        intensity = Float32(length(rays) / sum(map(solid_angle_intensity, rays)) * Float32(1 / ITERS))
-
+    
         rndm .= random(Float32, length(rays))
         if has_run
             next_hit!(hits, rays, n_tris, false)
@@ -234,7 +233,7 @@ function ad_frame_matrix(
     @info "syncing..."
     #CUDA.synchronize()
     @info "sync'ed"
-    frame_n = 32
+    frame_n = 1
     @info "images"
     #CUDA.memory_status()
     R = zeros(Float32, height, width)
@@ -256,7 +255,9 @@ function ad_frame_matrix(
 
             for λ in λ_min:dλ:λ_max
                 r0, g0, b0 = retina_red(λ), retina_green(λ), retina_blue(λ)
-
+                @assert ! isnan(r0)
+                @assert ! isnan(g0)
+                @assert ! isnan(b0)
 
                     # WARNING deleted `r.in_medium ? 0.0f0 : `
                     ϕ = Float32(2 * pi / 20 * frame_i / frame_n)
@@ -267,6 +268,8 @@ function ad_frame_matrix(
                     #if isnothing(s0)
                 #    println(eltype(hits))
                         s0 = shade.(rays, sky, λ, ϕ)
+                        map!(x->isnan(x) ? 0.0f0 : x, s0, s0)
+                        println(any(isnan, s0))
                     #else
                     #    map!(r->shade(r, sky, λ, ϕ), s0, rays)
                     #end
