@@ -102,3 +102,13 @@ end
 function shade(r :: ADRay, sky :: S, λ, ϕ) :: Float32 where S
 	r.in_medium ? 0.0f0 : sky(ray_dir(r, λ, 0.0f0, 0.0f0), λ, ϕ) * solid_angle_intensity(r)
 end
+
+"""
+I don't think it's possible to get continuous lens like shading  on a finite mesh.
+The brightness is based on a derivative of direction. For shading to be "smooth",
+(but really continuous in terms of a curve) this derivative must be continuous.
+
+An arc of ray's direction is continuous but not smooth due to a finite mesh.
+The derivative of that direction is then not guaranteed to be continuous, hence the
+color suddenly "jumps" at mesh edges.
+"""
