@@ -216,17 +216,18 @@ function ad_frame_matrix(
             println(eltype(hits))
             map!(evolve_ray, rays, rays, hits, rndm)
             #if iter == 2
-            #CUDA.@sync sort!(rays, by=ray->ray.retired, alg=CUDA.QuickSortAlg())
-
+            CUDA.@sync sort!(rays, by=ray->ray.retired, alg=CUDA.QuickSortAlg())
+            # CPU: 
+            # sort!(rays, by=ray->ray.retired)
             #cutoff = length(rays)
-            #cutoff = count(ray->!ray.retired, rays)
+            cutoff = count(ray->!ray.retired, rays)
             #@info "cutoff $cutoff"
-            #cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
-            #@info "cutoff $cutoff"
+            cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
+            @info "cutoff $cutoff"
 
-            #h_view = @view hits[1:cutoff]
-            #r_view = @view rays[1:cutoff]
-            next_hit!(hits, rays, n_tris, false)
+            h_view = @view hits[1:cutoff]
+            r_view = @view rays[1:cutoff]
+            next_hit!(h_view, r_view, n_tris, false)
         end
         rndm = random(Float32, width * height) .* (1 / ITERS) .+ ((noise_iter - 1) / ITERS)
         map!(evolve_ray, rays, rays, hits, rndm)
