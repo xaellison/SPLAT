@@ -17,22 +17,6 @@ function get_hit(n_t::Tuple{Int32,T}, r::AbstractRay)::Tuple{Float32,Int32,T} wh
     end
 end
 
-function get_hit(n_t::Tuple{Int32,T}, r::ADRay)::Tuple{Tuple{Float32,Float32},Int32,T} where {T}
-    n, t = n_t
-    d0 = distance_to_plane(r.pos, r.dir, t[2], t[1])
-    d(λ, x, y) = distance_to_plane(r.pos + r.pos′ * (λ - r.λ), r.dir + r.dir′ * (λ - r.λ) + r.dir_x′ * x + r.dir_y′*y, t[2], t[1])
-    p = r.pos + r.dir * d0
-    if in_triangle(p, t[2], t[3], t[4]) && d0 > 0 && r.ignore_tri != n
-        return ((d0,
-                ForwardDiff.derivative(distance_to_plane(r.pos + r.pos′ * (λ - r.λ), r.dir + r.dir′ * (λ - r.λ), t[2], t[1]), r.λ),
-                ForwardDiff.derivative(distance_to_plane(r.pos , r.dir + r.dir_x′ * x, t[2], t[1]), 0.0f0),
-                ForwardDiff.derivative(distance_to_plane(r.pos , r.dir + r.dir_y′ * y, t[2], t[1]), 0.0f0),
-                ), n, t)
-    else
-        return ((Inf32, Inf32), n, t)
-    end
-end
-
 ## !! Hit computers for AD and non-AD Rays
 
 function next_hit(rays :: AbstractArray{R}, n_tris :: AbstractArray{Tuple{I, T}}) where {R<:AbstractRay, I, T}
@@ -50,17 +34,18 @@ end
 
 
 function next_hit(rays :: AbstractArray{ADRay}, n_tris :: AbstractArray{Tuple{I, T}}, override) where {I, T}
-    dest = Array{Tuple{Tuple{Float32, Float32, Float32, Float32}, Int32, T}}(undef, size(rays))
+    dest = Array{Tuple{Float32, Int32, T}}(undef, size(rays))
     next_hit!(dest, rays, n_tris, override)
     return dest
 end
 
-function next_hit!(dest :: Array{Tuple{Tuple{Float32, Float32, Float32, Float32}, Int32, T}}, rays, n_tris:: AbstractArray{Tuple{I, T}}, override=false) where {I, T}
+function next_hit!(dest :: AbstractArray{Tuple{Float32, Int32, T}}, rays, n_tris:: AbstractArray{Tuple{I, T}}, override=false) where {I, T}
+
     for i in 1:length(dest)
         if !rays[i].retired || override
-            dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i]), n_tris, init=((Inf32, Inf32, Inf32, Inf32), typemax(Int32), zero(T)))
+            dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i]), n_tris, init=(Inf32, typemax(Int32), zero(T)))
         else
-            dest[i] = ((Inf32, Inf32), typemax(Int32), zero(T))
+            dest[i] = (Inf32, typemax(Int32), zero(T))
         end
     end
     return nothing
@@ -113,15 +98,15 @@ function handle_optics(r,  n, t, N, n1 :: N1, n2::N2, rndm) where {N1, N2}
     end
 end
 
-function evolve_ray(r::ADRay, d_n_t :: Tuple{Tuple{R, R, R, R}, I, T}, rndm)::ADRay where {R<:Real, I<:Integer, T}
-    (d, d′, d_x′, d_y′), n, t = d_n_t
+function evolve_ray(r::ADRay, d_n_t :: Tuple{R, I, T}, rndm)::ADRay where {R<:Real, I<:Integer, T}
+    d, n, t = d_n_t
     if r.retired
         return r
     end
+
     if isinf(d)
         return retired(r)
     end
-
 
     N(λ, x, y) = optical_normal(t, p(r, t, λ, x, y))
     if r.in_medium
@@ -149,12 +134,13 @@ function ad_frame_matrix(
     width::Int,
     height::Int,
     tris,
-    sky :: S,#::AbstractArray{Function},
+    sky :: S,
     dλ,
     depth,
     ITERS,
     phi,
     random,
+    zeros,
     A, # type: either Array or CuArray
 ) where S
     camera = camera_generator(1, 1)
@@ -196,7 +182,7 @@ function ad_frame_matrix(
     #@showprogress for (iter, λ) in [(iter, λ) for iter = 1:ITERS for λ = λ_min:dλ:λ_max]
     @info "tracing depth = $depth"
     ray_iters = []
-    @time for iter = 1:ITERS
+    @time for noise_iter = 1:ITERS
 
         if has_run
             dv .=
@@ -216,8 +202,7 @@ function ad_frame_matrix(
                 )
             rays = reshape(init_ray.(row_indices, col_indices, 550.0, dv), width * height)
         end
-
-        rndm .= random(Float32, length(rays))
+        rndm = random(Float32, length(rays)) .* (1 / ITERS) .+ ((noise_iter - 1) / ITERS)
         if has_run
             next_hit!(hits, rays, n_tris, false)
         else
@@ -226,40 +211,42 @@ function ad_frame_matrix(
         #
         for iter = 2:depth
             CUDA.memory_status()
-            rndm .= random(Float32, length(rays))
+            rndm = random(Float32, length(rays)) .* (1 / ITERS) .+ ((noise_iter - 1) / ITERS)
             #map!(d_r -> d_r[2], rays, hits)
             println(eltype(hits))
             map!(evolve_ray, rays, rays, hits, rndm)
             #if iter == 2
-            #sort!(rays, by=ray->ray.retired)
-            cutoff = length(rays)#count(ray->!ray.retired, rays)
-            @info "cutoff $cutoff"
-            cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
-                @info "cutoff $cutoff"
-            #end
-            h_view = @view hits[1:cutoff]
-            r_view = @view rays[1:cutoff]
-            next_hit!(h_view, r_view, n_tris, false)
+            #CUDA.@sync sort!(rays, by=ray->ray.retired, alg=CUDA.QuickSortAlg())
+
+            #cutoff = length(rays)
+            #cutoff = count(ray->!ray.retired, rays)
+            #@info "cutoff $cutoff"
+            #cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
+            #@info "cutoff $cutoff"
+
+            #h_view = @view hits[1:cutoff]
+            #r_view = @view rays[1:cutoff]
+            next_hit!(hits, rays, n_tris, false)
         end
-        rndm .= random(Float32, width * height)
+        rndm = random(Float32, width * height) .* (1 / ITERS) .+ ((noise_iter - 1) / ITERS)
         map!(evolve_ray, rays, rays, hits, rndm)
         has_run = true
-        push!(ray_iters, copy(rays))
+        push!(ray_iters, map(x->(x.dir, x.dir′, x.λ, x.dest), rays))
     end
     @info "syncing..."
     CUDA.synchronize()
     @info "sync'ed"
-    frame_n = 8
+    frame_n = 180
     @info "images"
     CUDA.memory_status()
-    R = CUDA.zeros(Float32, height, width)
+    R = zeros(Float32, height, width)
 
-    G = CUDA.zeros(Float32, height, width)
-    B = CUDA.zeros(Float32, height, width)
+    G = zeros(Float32, height, width)
+    B = zeros(Float32, height, width)
 
     I_s = []
     for rays in ray_iters
-        @time push!(I_s, map(get_dest, rays))
+        @time push!(I_s, map(x->x[4], rays))
     end
 
     hits = reshape(hits, length(hits))

@@ -7,7 +7,7 @@ include("../tracer.jl")
 include("../cuda.jl")
 function main()
 
-    obj_path = "objs/lion_head_2.obj"
+    obj_path = "objs/lion_head.obj"
     tris = mesh_to_STri(load(obj_path))
 
 	centroid = _centroid(tris)
@@ -15,8 +15,8 @@ function main()
 	println(model_box(tris))
     #tris = parse_obj(obj_path)
     @info "$(length(tris)) triangles"
-    width = 1024
-    height = 1024#Int(width * 3 / 4)
+    width = 512
+    height = 512#Int(width * 3 / 4)
     frame_n = 720
 
 	function moving_camera(frame_i, frame_n)
@@ -32,7 +32,7 @@ function main()
     dλ = 10
     ITERS = 1
 
-    skys = sky_rings
+    skys = sky_stripes_down
 
     #for i = 1:frame_n
 		# R0 gets corner up
@@ -42,7 +42,7 @@ function main()
 		translate(t::STri, v) = STri(t[1], t[2] - v, t[3] - v, t[4] - v, t[5], t[6], t[7])
 		translate(t::Tri, v) = Tri(t[1], t[2] - v, t[3] - v, t[4] - v)
 
-		tris′ = map(t -> translate(t, -centroid ), tris)
+		tris′ = map(t -> translate(t, -centroid + V3(0, 0, -1)), tris)
 		println(model_box(tris′))
         tris′ = map(t -> map(v -> R * v, t), tris′)
 
@@ -57,6 +57,7 @@ function main()
             ITERS,
             0,
             CUDA.rand,
+			CUDA.zeros,
             CuArray
         )
 

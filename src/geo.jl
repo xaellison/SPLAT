@@ -129,27 +129,33 @@ function get_camera(pos, lookat, true_up, fov)
     return Cam(pos, lookat, dir, up, right, sin(fov / 2))
 end
 
-
-
 function optical_normal(t::Tri, p)
     t[1]
+end
+
+function area(a, b, c)
+    return norm(cross(a - b, c - b)) / 2
 end
 
 function optical_normal(t::STri, pos :: V) :: V where V
     #return t[1]
     a, b, c = t[2], t[3], t[4]
     n_a, n_b, n_c = t[5], t[6], t[7]
-    det = (b[2] - c[2]) * (a[1] - c[1]) + (c[1] - b[1]) * (a[2] - c[2])
-    lambda1 = (b[2] - c[2]) * (pos[1] - c[1]) + (c[1] - b[1]) * (pos[2] - c[2])
-    lambda1 /= det
-    lambda2 = (c[2] - a[2]) * (pos[1] - c[1]) + (a[1] - c[1]) * (pos[2] - c[2])
-    lambda2 /= det
-    lambda3 = 1 - lambda1 - lambda2
-    lambda1 = clamp(lambda1, 0, 1)
-    lambda2 = clamp(lambda2, 0, 1)
-    lambda3 = clamp(lambda3, 0, 1)
-    return normalize(n_a * lambda1 + n_b * lambda2 + n_c * lambda3)
+    A = area(pos, b, c)
+    B = area(pos, c, a)
+    C = area(pos, a, b)
+    L_a = norm(b - c)
+    L_b = norm(c - a)
+    L_c = norm(a - b)
+    h_a = 2 * A / L_a
+    h_b = 2 * B / L_b
+    h_c = 2 * C / L_c
+    α = L_a * h_a ^ 1
+    β = L_b * h_b ^ 1
+    γ = L_c * h_c ^ 1
+    return (n_a * α + n_b * β + n_c * γ) / (α + β + γ)
 end
+
 
 
 function process_face(face, triangle_dest)
@@ -185,6 +191,9 @@ function mesh_to_STri(mesh)::Array{STri}
         (n1, n2, n3) = map(p -> V3(p.normals), face.points)
         #@info isa(v1, V3)
         #@info isa(n1, V3)
+        for v in map(normalize, [cross(v1 - v2, v2 - v3), n1, n2, n3])
+            @assert ! any(isnan, v)
+        end
         push!(out, STri(cross(v1 - v2, v2 - v3), v1, v2, v3, n1, n2, n3))
     end
     out
@@ -310,14 +319,9 @@ function rotation_matrix(axis, θ)
     return RotMatrix{3,Float32}(M)
 end
 
-@inline function distance_to_plane(
-    origin,
-    dir,
-    plane_point,
-    normal)
+@inline function distance_to_plane(origin, dir, plane_point, normal)
     normal = normalize(normal)
-    dist = (dot(normal, plane_point) - dot(normal, origin)) / dot(normal, dir)
-    dist
+    return (dot(normal, plane_point) - dot(normal, origin)) / dot(normal, dir)
 end
 
 function same_side(p1, p2, _a, _b)
@@ -340,32 +344,6 @@ function in_triangle(p, a, b, c)
     return true
 end
 
-function in_triangle(temp_hit, geometry, tri_id)
-    f = geometry.faces[tri_id]
-    a = geometry.vertices[f[1]]
-    b = geometry.vertices[f[2]]
-    c = geometry.vertices[f[3]]
-    return in_triangle(temp_hit.hit, a, b, c)
-end
-
-function intersection(ray, geometry, tri_id)::Hit
-    pos, dir = ray
-    a = geometry.vertices[geometry.faces[tri_id]][1]
-    normal = geometry.normals[tri_id]
-    dist = distance_to_plane(pos, normalize(dir), a, normal)
-    p = pos + normalize(dir) * dist
-
-    f = geometry.faces[tri_id]
-    a = geometry.vertices[f[1]]
-    b = geometry.vertices[f[2]]
-    c = geometry.vertices[f[3]]
-    if in_triangle(p, a, b, c)
-        return Hit(p, dist, tri_id)
-    else
-        return Hit(p, -1, -1)
-    end
-end
-
 function vector_cosine(a::V3, b::V3)::Float32
     return dot(a, b) / (norm(a) * norm(b))
 end
@@ -376,9 +354,13 @@ function project(a::V3, b::V3)::V3
 end
 
 function reflect(v, normal)
+    #@cuassert !isnan(normal[1])
+
     normal = normalize(normal)
+    #@cuassert !isnan(normal[1])
     temp = v - normal * dot(normal, v) * 2
     #vector_cosine(v, normal) ≈ -1*vector_cosine(temp, normal)
+    #@cuassert !isnan(temp[1])
     return temp
 end
 
@@ -465,7 +447,11 @@ function refract(v, normal, n1, n2)
     s1 = sqrt(1 - c1 * c1)
     s2 = (n1 / n2) * s1
     c2 = sqrt(1 - s2 * s2)
-    return normalize(v * (n1 / n2) + n * ((n1 / n2) * c1 - c2))
+    out = v * (n1 / n2) + n * ((n1 / n2) * c1 - c2)
+    #@cuassert !isnan(out[1])
+    out = normalize(out)
+    #@cuassert !isnan(out[1])
+    out
 end
 
 function refract_λ(v, n, n1, n2, λ::N) where N

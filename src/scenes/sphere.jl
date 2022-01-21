@@ -7,7 +7,7 @@ include("../tracer.jl")
 include("../cuda.jl")
 function main()
 
-    obj_path = "objs/sphere_2.obj"
+    obj_path = "objs/sphere.obj"
     tris = mesh_to_STri(load(obj_path))
 
 	centroid = _centroid(tris)
@@ -56,8 +56,9 @@ function main()
             depth,
             ITERS,
             0,
-            CUDA.rand,
-            CuArray
+            rand,
+			zeros,
+            Array
         )
 
     println("~fin")
