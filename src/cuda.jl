@@ -39,9 +39,11 @@ end
 
 
 function next_hit!(dest :: CuArray{I}, rays, n_tris:: CuArray{Tuple{I, T}}, override) where {I, T}
-    @assert length(rays) % 256 == 0
-    blocks = length(rays) ÷ 256
-    @cuda threads = 256 blocks = blocks shmem = (sizeof(I)+sizeof(T)) * 256 next_hit_kernel(
+    block_size = 256
+    @assert length(rays) % block_size == 0
+    blocks = cld(length(rays), block_size) |> Int
+    @info blocks, block_size
+    @cuda threads = block_size blocks = blocks shmem = (sizeof(I)+sizeof(T)) * block_size next_hit_kernel(
         rays,
         n_tris,
         dest,

@@ -1,5 +1,5 @@
 # RUN FROM /
-using Revise
+using Revise, CUDA
 
 include("../geo.jl")
 include("../skys.jl")
@@ -45,11 +45,12 @@ function main()
 		tris′ = map(t -> translate(t, -centroid ), tris)
 		println(model_box(tris′))
         tris′ = map(t -> map(v -> R * v, t), tris′)
-
+		hit_tris = map(t->Tri(t[1:4]...), tris′)
         images = @time ad_frame_matrix(
             moving_camera,
             width,
             height,
+			hit_tris,
             tris′,
             skys,
             dλ,

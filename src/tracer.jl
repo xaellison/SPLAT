@@ -29,7 +29,7 @@ function get_hit(n_t::Tuple{Int32,T}, r::ADRay)::Tuple{Tuple{Float32,Float32},In
     end
 end
 
-## Hit computers for AD Rays
+## Hit computers for AD  Rays
 
 
 function next_hit!(dest :: AbstractArray{I}, rays, n_tris:: AbstractArray{Tuple{I, T}}, override=false) where {I, T}
@@ -100,6 +100,7 @@ function ad_frame_matrix(
     camera_generator::Function,
     width::Int,
     height::Int,
+    hit_tris::AbstractArray{Tri},
     tris::AbstractArray{T},
     skys,#::AbstractArray{Function},
     dλ,
@@ -134,8 +135,9 @@ function ad_frame_matrix(
         return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 0, idx, λ, false)
     end
 
-    n_tris = collect(zip(map(Int32, collect(1:length(tris))), tris)) |> A |> m -> reshape(m, 1, length(m)) |> A
+    n_tris = collect(zip(map(Int32, collect(1:length(tris))), hit_tris)) |> A |> m -> reshape(m, 1, length(m)) |> A
     tris = A(tris)
+    hit_tris = A(hit_tris)
     row_indices = A(1:width)
     col_indices = reshape(A(1:height), 1, height)
     rays = A{ADRay}(undef, height * width)
