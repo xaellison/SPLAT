@@ -179,6 +179,7 @@ function mesh_to_STri(mesh)::Array{STri}
         #@info isa(n1, V3)
         push!(out, STri(cross(v1 - v2, v2 - v3), v1, v2, v3, n1, n2, n3))
     end
+    prepend!(out, [STri(zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3))])
     out
 end
 

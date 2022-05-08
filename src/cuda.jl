@@ -1,7 +1,7 @@
 using CUDA
 ## new gpu AD only
 
-function next_hit_kernel(rays, tris :: AbstractArray{T}, dest, default) where T
+function next_hit_kernel(rays, tris :: AbstractArray{T}, dest :: AbstractArray{D}, default :: D) where {T, D}
     shmem = @cuDynamicSharedMem(T, blockDim().x)
     i = threadIdx().x
     dest_idx = i + (blockIdx().x - 1) * blockDim().x
@@ -24,7 +24,7 @@ function next_hit_kernel(rays, tris :: AbstractArray{T}, dest, default) where T
             d(λ) = distance_to_plane(r.pos + r.pos′ * (λ - r.λ), r.dir + r.dir′ * (λ - r.λ), t[2], t[1])
             p = r.pos + r.dir * d0
             if in_triangle(p, t[2], t[3], t[4]) && min_val > d0 > 0 && r.ignore_tri != n
-                arg_min = ((d0, ForwardDiff.derivative(d, r.λ)), n, t)
+                arg_min = n
                 min_val = d0
             end
             ####
@@ -38,14 +38,14 @@ function next_hit_kernel(rays, tris :: AbstractArray{T}, dest, default) where T
 end
 
 
-function next_hit!(dest :: CuArray{Tuple{Tuple{Float32, Float32}, Int32, T}}, rays, n_tris:: AbstractArray{Tuple{I, T}}, override) where {I, T}
+function next_hit!(dest :: CuArray{I}, rays, n_tris:: CuArray{Tuple{I, T}}, override) where {I, T}
     @assert length(rays) % 256 == 0
     blocks = length(rays) ÷ 256
     @cuda threads = 256 blocks = blocks shmem = (sizeof(I)+sizeof(T)) * 256 next_hit_kernel(
         rays,
         n_tris,
         dest,
-        ((Inf32, Inf32), typemax(Int32), zeros(T)),
+        Int32(1),
     )
     return dest
     return nothing

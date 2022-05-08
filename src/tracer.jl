@@ -13,7 +13,7 @@ function get_hit(n_t::Tuple{Int32,T}, r::AbstractRay)::Tuple{Float32,Int32,T} wh
     if in_triangle(p, t[2], t[3], t[4]) && d > 0 && r.ignore_tri != n
         return (d, n, t)
     else
-        return (Inf32, n, t)
+        return (Inf32, typemax(Int32), t)
     end
 end
 
@@ -29,22 +29,18 @@ function get_hit(n_t::Tuple{Int32,T}, r::ADRay)::Tuple{Tuple{Float32,Float32},In
     end
 end
 
-## Hit computers for AD and non-AD Rays
-
-function next_hit!(dest :: Array{Tuple{Float32, Int32, T}}, rays, n_tris:: AbstractArray{Tuple{I, T}}) where {I, T}
-    @simd for i in 1:length(dest)
-        dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i]), n_tris, init=(Inf32, typemax(Int32), zero(T)))
-    end
-    return nothing
-end
+## Hit computers for AD Rays
 
 
-function next_hit!(dest :: Array{Tuple{Tuple{Float32, Float32}, Int32, T}}, rays, n_tris:: AbstractArray{Tuple{I, T}}, override=false) where {I, T}
+function next_hit!(dest :: AbstractArray{I}, rays, n_tris:: AbstractArray{Tuple{I, T}}, override=false) where {I, T}
     for i in 1:length(dest)
         if !rays[i].retired || override
-            dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i]), n_tris, init=((Inf32, Inf32), typemax(Int32), zero(T)))
+            dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i]), n_tris, init=((Inf32, Inf32), typemax(Int32), zero(T)))[2]
+            if dest[i] == typemax(I)
+                dest[i] = one(I)
+            end
         else
-            dest[i] = ((Inf32, Inf32), typemax(Int32), zero(T))
+            dest[i] = one(Int32)
         end
     end
     return nothing
@@ -52,58 +48,6 @@ end
 
 ## Ray evolvers
 
-function evolve_ray(r::Ray, d_n_t, rndm)::Ray
-    d, n, t = d_n_t
-    if isinf(d)
-        return r
-    end
-    p = r.pos + r.dir * d
-
-    n1, n2 = 1.0f0, glass(r.λ)
-    if r.in_medium
-        n2, n1 = n1, n2
-    end
-    N = optical_normal(t, p)
-
-    s_polarization = project(r.polarization, N)
-    p_polarization = r.polarization - s_polarization
-
-    if can_refract(r.dir, N, n1, n2)
-        # if we can reflect, scale probability between two polarizations
-        # NB T_p + R_p + T_s + T_p = 2
-        r_s = reflectance_s(r.dir, N, n1, n2)
-        r_p = reflectance_p(r.dir, N, n1, n2)
-        if rndm <= (1 - r_s) / 2.0f0
-            s_polarization = normalize(s_polarization)
-            return Ray(
-                p,
-                refract(r.dir, N, n1, n2),
-                s_polarization,
-                !r.in_medium,
-                n,
-                r.dest,
-                r.λ,
-            )
-        elseif rndm <= (2 - r_s - r_p) / 2.0f0
-            p_polarization = normalize(p_polarization)
-            return Ray(
-                p,
-                refract(r.dir, N, n1, n2),
-                p_polarization,
-                !r.in_medium,
-                n,
-                r.dest,
-                r.λ,
-            )
-        end
-    end
-    # NB this guard clause setup allows us to reflect if it is necessary (transmission = 0)
-    # or if it was simply selected probabalistically.
-    reflected_direction = reflect(r.dir, N)
-    reflected_polarization = normalize(cross(reflected_direction, p_polarization))
-    return Ray(p, reflected_direction, reflected_polarization, r.in_medium, n, r.dest, r.λ)
-
-end
 
 function p(r, d, d′, λ::N) where N
     r.pos + # origin constant
@@ -132,11 +76,10 @@ function handle_optics(r, d, d′, n, N, n1 :: N1, n2::N2, rndm) where {N1, N2}
     end
 end
 
-function evolve_ray(r::ADRay, d_n_t :: Tuple{Tuple{R, R}, I, T}, rndm)::ADRay where {R<:Real, I<:Integer, T}
-    (d, d′), n, t = d_n_t
-    if r.retired
-        return r
-    end
+function evolve_ray(r::ADRay, n, t, rndm)::ADRay
+
+    (d, d′), n, t = get_hit((n, t), r)
+
     if isinf(d)
         return retired(r)
     end
@@ -192,9 +135,11 @@ function ad_frame_matrix(
     end
 
     n_tris = collect(zip(map(Int32, collect(1:length(tris))), tris)) |> A |> m -> reshape(m, 1, length(m)) |> A
+    tris = A(tris)
     row_indices = A(1:width)
     col_indices = reshape(A(1:height), 1, height)
     rays = A{ADRay}(undef, height * width)
+    hit_idx = A(zeros(Int32, length(rays)))
     ray_dests = map(Int32, A(1:length(rays)))
     dv = A{V3}(undef, width) # make w*h
     s0 = nothing
@@ -218,14 +163,16 @@ function ad_frame_matrix(
 
         for iter = 1:depth
             # compute hits
-            h_view = @view hits[1:cutoff]
+            @info cutoff
+            h_view = @view hit_idx[1:cutoff]
             r_view = @view rays[1:cutoff]
             @info "hits..."
             CUDA.@time CUDA.@sync next_hit!(h_view, r_view, n_tris, false)
 
             # evolve rays optically
             rndm .= random(Float32, length(rays))
-            map!(evolve_ray, rays, rays, hits, rndm)
+            tri_view = @view tris[hit_idx]
+            map!(evolve_ray, rays, rays, hit_idx, tri_view, rndm)
 
             # retire appropriate rays
             @info "retirement sort..."
@@ -233,8 +180,6 @@ function ad_frame_matrix(
             cutoff = count(ray->!ray.retired, rays)
             cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
         end
-        rndm .= random(Float32, width * height)
-        map!(evolve_ray, rays, rays, hits, rndm)
     end
 
     frame_n = 18
@@ -281,7 +226,7 @@ function ad_frame_matrix(
                 end
             end
 
-            Makie.save("out/tiger/may/$(lpad(frame_i, 3, "0")).png", img)
+            Makie.save("out/lion/may/$(lpad(frame_i, 3, "0")).png", img)
 
         end
     end
