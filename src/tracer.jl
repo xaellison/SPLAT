@@ -29,13 +29,7 @@ function get_hit(n_t::Tuple{Int32,T}, r::ADRay)::Tuple{Tuple{Float32,Float32},In
     end
 end
 
-## !! Hit computers for AD and non-AD Rays
-
-function next_hit(rays :: AbstractArray{R}, n_tris :: AbstractArray{Tuple{I, T}}) where {R<:AbstractRay, I, T}
-    dest = Array{Tuple{Float32, Int32, T}}(undef, size(rays))
-    next_hit!(dest, rays, n_tris)
-    return dest
-end
+## Hit computers for AD and non-AD Rays
 
 function next_hit!(dest :: Array{Tuple{Float32, Int32, T}}, rays, n_tris:: AbstractArray{Tuple{I, T}}) where {I, T}
     @simd for i in 1:length(dest)
@@ -44,12 +38,6 @@ function next_hit!(dest :: Array{Tuple{Float32, Int32, T}}, rays, n_tris:: Abstr
     return nothing
 end
 
-
-function next_hit(rays :: AbstractArray{ADRay}, n_tris :: AbstractArray{Tuple{I, T}}, override) where {I, T}
-    dest = Array{Tuple{Tuple{Float32, Float32}, Int32, T}}(undef, size(rays))
-    next_hit!(dest, rays, n_tris, override)
-    return dest
-end
 
 function next_hit!(dest :: Array{Tuple{Tuple{Float32, Float32}, Int32, T}}, rays, n_tris:: AbstractArray{Tuple{I, T}}, override=false) where {I, T}
     for i in 1:length(dest)
@@ -169,7 +157,7 @@ function ad_frame_matrix(
     camera_generator::Function,
     width::Int,
     height::Int,
-    tris,
+    tris::AbstractArray{T},
     skys,#::AbstractArray{Function},
     dλ,
     depth,
@@ -177,7 +165,7 @@ function ad_frame_matrix(
     phi,
     random,
     A, # type: either Array or CuArray
-)
+) where T
     camera = camera_generator(1, 1)
 
     #out .= RGBf(0, 0, 0)
@@ -203,70 +191,53 @@ function ad_frame_matrix(
         return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 0, idx, λ, false)
     end
 
-    I = map(Int32, collect(1:length(tris)))
-    n_tris = collect(zip(I, tris)) |> A |> m -> reshape(m, 1, length(m)) |> A
-
+    n_tris = collect(zip(map(Int32, collect(1:length(tris))), tris)) |> A |> m -> reshape(m, 1, length(m)) |> A
     row_indices = A(1:width)
     col_indices = reshape(A(1:height), 1, height)
-    has_run = false
-    rays = nothing
-    hits = nothing
-    grid = nothing
-    rndm = nothing
-    dv = nothing
-    I = nothing
+    rays = A{ADRay}(undef, height * width)
+    ray_dests = map(Int32, A(1:length(rays)))
+    dv = A{V3}(undef, width) # make w*h
     s0 = nothing
     #@showprogress for (iter, λ) in [(iter, λ) for iter = 1:ITERS for λ = λ_min:dλ:λ_max]
+
+    # Datastruct init
+    #rays = CuArray()
+    hits = A{Tuple{Tuple{Float32, Float32}, Int32, T}}(undef, (height* width))
+    rndm = random(Float32, width * height)
     @info "tracing depth = $depth"
     @time for iter = 1:ITERS
 
-        if has_run
-            dv .=
-                V3.(
-                    random(Float32, width),
-                    random(Float32, width),
-                    random(Float32, width),
-                )
-            rays .= reshape(init_ray.(row_indices, col_indices, 550.0, dv), width * height)
-        else
-            rndm = random(Float32, width * height)
-            dv =
-                V3.(
-                    random(Float32, width),
-                    random(Float32, width),
-                    random(Float32, width),
-                )
-            rays = reshape(init_ray.(row_indices, col_indices, 550.0, dv), width * height)
-        end
+        dv .=
+            V3.(
+                random(Float32, width),
+                random(Float32, width),
+                random(Float32, width),
+            )
+        rays .= reshape(init_ray.(row_indices, col_indices, 550.0, dv), width * height)
+        cutoff = length(rays)
 
-        rndm .= random(Float32, length(rays))
-        if has_run
-            next_hit!(hits, rays, n_tris, false)
-        else
-            CUDA.@time CUDA.@sync hits = next_hit(rays, n_tris, true)
-        end
-        #
-        for iter = 2:depth
-            rndm .= random(Float32, length(rays))
-            #map!(d_r -> d_r[2], rays, hits)
-            map!(evolve_ray, rays, rays, hits, rndm)
-            #if iter == 2
-            CUDA.@time CUDA.@sync     sort!(rays, by=ray->ray.retired)
-            cutoff = count(ray->!ray.retired, rays)
-            @info "cutoff $cutoff"
-            cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
-                @info "cutoff $cutoff"
-            #end
+        for iter = 1:depth
+            # compute hits
             h_view = @view hits[1:cutoff]
             r_view = @view rays[1:cutoff]
+            @info "hits..."
             CUDA.@time CUDA.@sync next_hit!(h_view, r_view, n_tris, false)
+
+            # evolve rays optically
+            rndm .= random(Float32, length(rays))
+            map!(evolve_ray, rays, rays, hits, rndm)
+
+            # retire appropriate rays
+            @info "retirement sort..."
+            CUDA.@time CUDA.@sync sort!(rays, by=ray->ray.retired)
+            cutoff = count(ray->!ray.retired, rays)
+            cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
         end
         rndm .= random(Float32, width * height)
         map!(evolve_ray, rays, rays, hits, rndm)
-        has_run = true
     end
 
-    frame_n = 180
+    frame_n = 18
     @info "images"
     R = A(zeros(Float32, height, width))
     G = A(zeros(Float32, height, width))
@@ -281,21 +252,19 @@ function ad_frame_matrix(
                 # WARNING deleted `r.in_medium ? 0.0f0 : `
                 g = r -> sky(r.dir + r.dir′ * (λ - r.λ), λ, Float32(2 * pi / 20 * frame_i / frame_n))
 
-                if isnothing(I)
-                    I = map(r->r.dest, rays)
-                else
-                    map!(r->r.dest, I, rays)
-                end
+            @assert size(ray_dests) == size(rays)
+            map!(r->r.dest, ray_dests, rays)
 
+            @assert size(ray_dests) == size(rays)
                 if isnothing(s0)
                     s0 = g.(rays)
                 else
                     map!(g, s0, rays)
                 end
 
-                R[I] .+= intensity * s0 * r0 * dλ
-                G[I] .+= intensity * s0 * g0 * dλ
-                B[I] .+= intensity * s0 * b0 * dλ
+                R[ray_dests] .+= intensity * s0 * r0 * dλ
+                G[ray_dests] .+= intensity * s0 * g0 * dλ
+                B[ray_dests] .+= intensity * s0 * b0 * dλ
             end
         end
 
@@ -312,7 +281,7 @@ function ad_frame_matrix(
                 end
             end
 
-            Makie.save("out/tiger/_/$(lpad(frame_i, 3, "0")).png", img)
+            Makie.save("out/tiger/may/$(lpad(frame_i, 3, "0")).png", img)
 
         end
     end

@@ -38,12 +38,6 @@ function next_hit_kernel(rays, tris :: AbstractArray{T}, dest, default) where T
 end
 
 
-function next_hit(rays :: CuArray{ADRay}, n_tris :: CuArray{Tuple{I, T}}, override) where {I, T}
-    dest = CuArray{Tuple{Tuple{Float32, Float32}, I, T}}(undef, size(rays))
-    next_hit!(dest, rays, n_tris, override)
-    return dest
-end
-
 function next_hit!(dest :: CuArray{Tuple{Tuple{Float32, Float32}, Int32, T}}, rays, n_tris:: AbstractArray{Tuple{I, T}}, override) where {I, T}
     @assert length(rays) % 256 == 0
     blocks = length(rays) ÷ 256
