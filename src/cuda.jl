@@ -47,7 +47,7 @@ function next_hit!(dest :: CuArray{I}, rays, n_tris:: CuArray{Tuple{I, T}}, over
         rays,
         n_tris,
         dest,
-        Int32(1),
+        Int32(1), # this default is the degenerate triangle which no ray can hit
     )
     return dest
     return nothing

@@ -175,10 +175,9 @@ function mesh_to_STri(mesh)::Array{STri}
     for face in mesh
         (v1, v2, v3) = map(p -> V3(p.position), face.points)
         (n1, n2, n3) = map(p -> V3(p.normals), face.points)
-        #@info isa(v1, V3)
-        #@info isa(n1, V3)
         push!(out, STri(cross(v1 - v2, v2 - v3), v1, v2, v3, n1, n2, n3))
     end
+    # prepend degenerate triangle which will alway fail hit tests
     prepend!(out, [STri(zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3))])
     out
 end

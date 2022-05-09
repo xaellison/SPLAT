@@ -19,6 +19,7 @@ end
 
 function get_hit(n_t::Tuple{Int32,T}, r::ADRay)::Tuple{Tuple{Float32,Float32},Int32,T} where {T}
     n, t = n_t
+    # for n = 1, the degenerate triangle, this will be NaN, which fails d0 > 0 below
     d0 = distance_to_plane(r.pos, r.dir, t[2], t[1])
     d(λ) = distance_to_plane(r.pos + r.pos′ * (λ - r.λ), r.dir + r.dir′ * (λ - r.λ), t[2], t[1])
     p = r.pos + r.dir * d0
