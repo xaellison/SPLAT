@@ -102,13 +102,15 @@ function ad_frame_matrix(
     height::Int,
     hit_tris::AbstractArray{Tri},
     tris::AbstractArray{T},
-    skys,#::AbstractArray{Function},
+    skys,
     dλ,
     depth,
     ITERS,
     phi,
     random,
     A, # type: either Array or CuArray
+    sort_optimization,
+    title,
 ) where T
     camera = camera_generator(1, 1)
 
@@ -142,15 +144,14 @@ function ad_frame_matrix(
     col_indices = reshape(A(1:height), 1, height)
     rays = A{ADRay}(undef, height * width)
     hit_idx = A(zeros(Int32, length(rays)))
-    ray_dests = map(Int32, A(1:length(rays)))
     dv = A{V3}(undef, width) # make w*h
     s0 = A{Float32}(undef, length(rays), 3)
-    #@showprogress for (iter, λ) in [(iter, λ) for iter = 1:ITERS for λ = λ_min:dλ:λ_max]
+
 
     # Datastruct init
-    #rays = CuArray()
     hits = A{Tuple{Tuple{Float32, Float32}, Int32, T}}(undef, (height* width))
     rndm = random(Float32, width * height)
+    synchronize()
     @info "tracing depth = $depth"
     @time for iter = 1:ITERS
 
@@ -169,7 +170,7 @@ function ad_frame_matrix(
             h_view = @view hit_idx[1:cutoff]
             r_view = @view rays[1:cutoff]
             @info "hits..."
-            CUDA.@time CUDA.@sync next_hit!(h_view, r_view, n_tris, false)
+            next_hit!(h_view, r_view, n_tris, false)
 
             # evolve rays optically
             rndm .= random(Float32, length(rays))
@@ -177,53 +178,51 @@ function ad_frame_matrix(
             map!(evolve_ray, rays, rays, hit_idx, tri_view, rndm)
 
             # retire appropriate rays
-            @info "retirement sort..."
-            CUDA.@time CUDA.@sync sort!(r_view, by=ray->ray.retired)
-            cutoff = count(ray->!ray.retired, r_view)
-            cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
+            if sort_optimization
+                @info "retirement sort..."
+                sort!(r_view, by=ray->ray.retired)
+                cutoff = count(ray->!ray.retired, r_view)
+                cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
+            end
         end
     end
 
     frame_n = 18
     @info "images"
-    RGB = A(zeros(Float32, length(rays), 3))
-    sort!(rays, by=r->r.dest)
+    # output array
+    RGB = A{Float32}(undef, length(rays), 3)
+    if sort_optimization
+        # restore original order so we can use simple broadcasts to color RGB
+        sort!(rays, by=r->r.dest)
+    end
+    # use host to compute constants used in turning spectra into colors
+    spectrum = collect(λ_min:dλ:λ_max) |> a -> reshape(a, 1, 1, length(a))
+    retina_factor = Array{Float32}(undef, 1, 3, length(spectrum))
+    r_view = @view retina_factor[1, 1, :]
+    map!(retina_red, r_view, spectrum)
+    g_view = @view retina_factor[1, 2, :]
+    map!(retina_green, g_view, spectrum)
+    b_view = @view retina_factor[1, 3, :]
+    map!(retina_blue, b_view, spectrum)
+    retina_factor=A(retina_factor)
+    spectrum = A(spectrum)
+
     @time for frame_i in 1:frame_n
         RGB .= 0.0f0
-        #G .= 0.0f0
-        #B .= 0.0f0
-
-        #for λ in λ_min:dλ:λ_max
-        spectrum = collect(λ_min:dλ:λ_max) |> a -> reshape(a, 1, 1, length(a))
-        retina_factor = Array{Float32}(undef, 1, 3, length(spectrum))
-        r_view = @view retina_factor[1, 1, :]
-        map!(retina_red, r_view, spectrum)
-        g_view = @view retina_factor[1, 2, :]
-        map!(retina_green, g_view, spectrum)
-        b_view = @view retina_factor[1, 3, :]
-        map!(retina_blue, b_view, spectrum)
-
-        retina_factor=A(retina_factor)
-        spectrum = A(spectrum)
-        #r0, g0, b0 = retina_red(λ), retina_green(λ), retina_blue(λ)
         for (i, sky) in enumerate(skys)
             # WARNING deleted `r.in_medium ? 0.0f0 : `
-            g(r, λ, s) = sky(r.dir + r.dir′ * (λ - r.λ), λ, Float32(2 * pi / 20 * frame_i / frame_n)) * s * intensity * dλ
+            sky_sample(r, λ, s) = sky(r.dir + r.dir′ * (λ - r.λ), λ, Float32(2 * pi / 20 * frame_i / frame_n)) * s * intensity * dλ
 
-            broadcast = @~ g.(rays, spectrum, retina_factor)
-            RGB = sum(broadcast, dims=(3)) |> a -> reshape(a, length(rays), 3)
+            broadcast = @~ sky_sample.(rays, spectrum, retina_factor)
+            RGB = sum(broadcast, dims=3) |> a -> reshape(a, length(rays), 3)
             map!(brightness -> clamp(brightness, 0, 1), RGB, RGB)
         end
 
         out = Dict()
         for s in keys(skys)
-            _R, _G, _B = map(a -> reshape(Array(a), height, width), (RGB[:, 1], RGB[:, 2], RGB[:, 3]))
 
-#            safe_rgbf0(r, g, b) = RGBf(clamp(r,0,1), clamp(g,0,1), clamp(b, 0, 1))
-            img = RGBf.(_R, _G, _B)# Array{RGBf}(undef, size(_R)...)
-
-
-            Makie.save("out/lion/may/$(lpad(frame_i, 3, "0")).png", img)
+            img = RGBf.(map(a -> reshape(Array(a), height, width), (RGB[:, 1], RGB[:, 2], RGB[:, 3]))...)
+            Makie.save("out/$title/$(lpad(frame_i, 3, "0")).png", img)
 
         end
     end
