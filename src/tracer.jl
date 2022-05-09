@@ -144,7 +144,7 @@ function ad_frame_matrix(
     hit_idx = A(zeros(Int32, length(rays)))
     ray_dests = map(Int32, A(1:length(rays)))
     dv = A{V3}(undef, width) # make w*h
-    s0 = nothing
+    s0 = A{Float32}(undef, length(rays), 3)
     #@showprogress for (iter, λ) in [(iter, λ) for iter = 1:ITERS for λ = λ_min:dλ:λ_max]
 
     # Datastruct init
@@ -178,55 +178,50 @@ function ad_frame_matrix(
 
             # retire appropriate rays
             @info "retirement sort..."
-            CUDA.@time CUDA.@sync sort!(rays, by=ray->ray.retired)
-            cutoff = count(ray->!ray.retired, rays)
+            CUDA.@time CUDA.@sync sort!(r_view, by=ray->ray.retired)
+            cutoff = count(ray->!ray.retired, r_view)
             cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
         end
     end
 
     frame_n = 18
     @info "images"
-    R = A(zeros(Float32, height, width))
-    G = A(zeros(Float32, height, width))
-    B = A(zeros(Float32, height, width))
+    RGB = A(zeros(Float32, length(rays), 3))
+    sort!(rays, by=r->r.dest)
     @time for frame_i in 1:frame_n
-        R .= 0.0f0
-        G .= 0.0f0
-        B .= 0.0f0
-        for λ in λ_min:dλ:λ_max
-            r0, g0, b0 = retina_red(λ), retina_green(λ), retina_blue(λ)
-            for (i, sky) in enumerate(skys)
-                # WARNING deleted `r.in_medium ? 0.0f0 : `
-                g = r -> sky(r.dir + r.dir′ * (λ - r.λ), λ, Float32(2 * pi / 20 * frame_i / frame_n))
+        RGB .= 0.0f0
+        #G .= 0.0f0
+        #B .= 0.0f0
 
-            @assert size(ray_dests) == size(rays)
-            map!(r->r.dest, ray_dests, rays)
+        #for λ in λ_min:dλ:λ_max
+        spectrum = collect(λ_min:dλ:λ_max) |> a -> reshape(a, 1, 1, length(a))
+        retina_factor = Array{Float32}(undef, 1, 3, length(spectrum))
+        r_view = @view retina_factor[1, 1, :]
+        map!(retina_red, r_view, spectrum)
+        g_view = @view retina_factor[1, 2, :]
+        map!(retina_green, g_view, spectrum)
+        b_view = @view retina_factor[1, 3, :]
+        map!(retina_blue, b_view, spectrum)
 
-            @assert size(ray_dests) == size(rays)
-                if isnothing(s0)
-                    s0 = g.(rays)
-                else
-                    map!(g, s0, rays)
-                end
+        retina_factor=A(retina_factor)
+        spectrum = A(spectrum)
+        #r0, g0, b0 = retina_red(λ), retina_green(λ), retina_blue(λ)
+        for (i, sky) in enumerate(skys)
+            # WARNING deleted `r.in_medium ? 0.0f0 : `
+            g(r, λ, s) = sky(r.dir + r.dir′ * (λ - r.λ), λ, Float32(2 * pi / 20 * frame_i / frame_n)) * s * intensity * dλ
 
-                R[ray_dests] .+= intensity * s0 * r0 * dλ
-                G[ray_dests] .+= intensity * s0 * g0 * dλ
-                B[ray_dests] .+= intensity * s0 * b0 * dλ
-            end
+            broadcast = @~ g.(rays, spectrum, retina_factor)
+            RGB = sum(broadcast, dims=(3)) |> a -> reshape(a, length(rays), 3)
+            map!(brightness -> clamp(brightness, 0, 1), RGB, RGB)
         end
 
         out = Dict()
         for s in keys(skys)
-            _R, _G, _B = map(Array, (R, G, B))
-            img = Array{RGBf}(undef, size(_R)...)
-            @simd for i = 1:length(img)
-                if isnan(_R[i]) || isnan(_G[i]) || isnan(_B[i])
-                    img[i] = RGBf(1.0f0, 0.0f0, 0.0f0)
-                else
-                    r, g, b = clamp(_R[i], 0, 1), clamp(_G[i], 0, 1), clamp(_B[i], 0, 1)
-                    img[i] = RGBf(r, g, b)
-                end
-            end
+            _R, _G, _B = map(a -> reshape(Array(a), height, width), (RGB[:, 1], RGB[:, 2], RGB[:, 3]))
+
+#            safe_rgbf0(r, g, b) = RGBf(clamp(r,0,1), clamp(g,0,1), clamp(b, 0, 1))
+            img = RGBf.(_R, _G, _B)# Array{RGBf}(undef, size(_R)...)
+
 
             Makie.save("out/lion/may/$(lpad(frame_i, 3, "0")).png", img)
 
