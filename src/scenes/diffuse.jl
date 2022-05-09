@@ -7,8 +7,13 @@ include("../tracer.jl")
 include("../cuda.jl")
 function main()
 
+	translate(t, v) = STri(t[1], t[2] - v, t[3] - v, t[4] - v, t[5], t[6], t[7])
+
     obj_path = "objs/sphere.obj"
     tris = mesh_to_STri(load(obj_path))
+	map!(t->translate(t, V3(-10, 0,0)), tris, tris)
+	tris = vcat(tris, mesh_to_STri(load(obj_path)))
+	map!(t->translate(t, V3(5,0, 0,)), tris, tris)
 
 	centroid = _centroid(tris)
 	println(centroid)
@@ -20,7 +25,7 @@ function main()
     frame_n = 720
 
 	function moving_camera(frame_i, frame_n)
-		camera_pos = V3((7, 0, 0)) + centroid
+		camera_pos = V3((12, 0, 0)) + centroid
 		look_at = zero(V3)
 		up = V3((0.0, 0.0, -1.0))
 		FOV =  45.0 * pi / 180.0
@@ -36,10 +41,6 @@ function main()
 
 
 		R = rotation_matrix(V3(1, 1, 1), 2 * pi * 0 / frame_n)
-        #translate(t, v) = STri(t[1], t[2] - v, t[3] - v, t[4] - v, t[5:7]...)
-		translate(t, v) = STri(t[1], t[2] - v, t[3] - v, t[4] - v, t[5], t[6], t[7])
-		#translate(t, v) = Tri(t[1], t[2] - v, t[3] - v, t[4] - v)
-
 
 		tris′ = map(t -> translate(t, -centroid ), tris)
 		println(model_box(tris′))

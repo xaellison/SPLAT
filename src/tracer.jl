@@ -77,12 +77,21 @@ function handle_optics(r, d, d′, n, N, n1 :: N1, n2::N2, rndm) where {N1, N2}
     end
 end
 
-function evolve_ray(r::ADRay, n, t, rndm)::ADRay
+function evolve_ray(r::ADRay, n, t, rndm, first_diffuse_index)::ADRay
 
     (d, d′), n, t = get_hit((n, t), r)
 
     if isinf(d)
         return retired(r)
+    end
+
+    if n >= first_diffuse_index
+        # compute the position in the new triangle, set dir to zero
+        return  ADRay(p(r, d, d′, r.λ),
+                     ForwardDiff.derivative(λ->p(r, d, d′, λ), r.λ),
+                     zero(V3),
+                     zero(V3),
+                     r.in_medium, n, r.dest, r.λ, RAY_STATUS_DIFFUSE)
     end
 
 
@@ -135,7 +144,7 @@ function ad_frame_matrix(
         dir = normalize(dir)
         idx = (x - 1) * height + y
         polarization = normalize(cross(camera.up, dir))
-        return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 0, idx, λ, false)
+        return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 0, idx, λ, RAY_STATUS_ACTIVE)
     end
 
     n_tris = collect(zip(map(Int32, collect(1:length(tris))), hit_tris)) |> A |> m -> reshape(m, 1, length(m)) |> A
@@ -176,13 +185,15 @@ function ad_frame_matrix(
             # evolve rays optically
             rndm .= random(Float32, length(rays))
             tri_view = @view tris[hit_idx]
-            map!(evolve_ray, rays, rays, hit_idx, tri_view, rndm)
+            # I need to pass a scalar arg - this closure seems necessary since map! freaks at scalar args
+            evolve_closure(rays, hit_idx, tri_view, rndm) = evolve_ray(rays, hit_idx, tri_view, rndm, 226)
+            map!(evolve_closure, rays, rays, hit_idx, tri_view, rndm)
 
             # retire appropriate rays
             if sort_optimization
                 @info "retirement sort..."
-                sort!(r_view, by=ray->ray.retired)
-                cutoff = count(ray->!ray.retired, r_view)
+                sort!(r_view, by=ray->ray.status)
+                cutoff = count(ray->ray.status==RAY_STATUS_ACTIVE, r_view)
                 cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
             end
         end
