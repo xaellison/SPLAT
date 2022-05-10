@@ -17,6 +17,7 @@ const _COS_45 = 1 / sqrt(2)
 const Tri = SVector{4,V3}
 
 const STri = SVector{7,V3}
+const FTri = SVector{10, V3}
 
 struct Cam
     pos::V3
@@ -38,16 +39,12 @@ struct ADRay <: AbstractRay
     ignore_tri::Int
     dest::Int
     λ::Float32
-    status::UInt8
+    retired::Bool
 end
-
-const RAY_STATUS_ACTIVE=UInt8(0)
-const RAY_STATUS_DIFFUSE=UInt8(1)
-const RAY_STATUS_INFINITY=UInt8(2)
 
 function retired(ray::ADRay)
     return ADRay(ray.pos, ray.pos′, ray.dir, ray.dir′,
-                 ray.in_medium, ray.ignore_tri, ray.dest, ray.λ, RAY_STATUS_INFINITY)
+                 ray.in_medium, ray.ignore_tri, ray.dest, ray.λ, true)
 end
 
 struct Ray <: AbstractRay
@@ -147,6 +144,26 @@ function optical_normal(t::STri, pos :: V) :: V where V
     return normalize(n_a * lambda1 + n_b * lambda2 + n_c * lambda3)
 end
 
+function optical_normal(t::FTri, pos::V) :: V where V
+    optical_normal(STri(t[1], t[2], t[3], t[4], t[5], t[6], t[7]), pos)
+end
+
+
+function reverse_uv(pos::V3, t::FTri) :: Pair{Float32, Float32}
+    a, b, c = t[2], t[3], t[4]
+    t_a, t_b, t_c = t[8], t[9], t[10]
+    det = (b[2] - c[2]) * (a[1] - c[1]) + (c[1] - b[1]) * (a[2] - c[2])
+    lambda1 = (b[2] - c[2]) * (pos[1] - c[1]) + (c[1] - b[1]) * (pos[2] - c[2])
+    lambda1 /= det
+    lambda2 = (c[2] - a[2]) * (pos[1] - c[1]) + (a[1] - c[1]) * (pos[2] - c[2])
+    lambda2 /= det
+    lambda3 = 1 - lambda1 - lambda2
+    lambda1 = clamp(lambda1, 0, 1)
+    lambda2 = clamp(lambda2, 0, 1)
+    lambda3 = clamp(lambda3, 0, 1)
+    t_vec = t_a * lambda1 + t_b * lambda2 + t_c * lambda3
+    return Pair(t_vec[1], t_vec[2])
+end
 
 function process_face(face, triangle_dest)
     # face is a face of vertex indices which may be a polygon of degree > 3.
@@ -171,7 +188,8 @@ function mesh_to_Tri(mesh)::Array{Tri}
     for face in mesh
         process_face(face, out)
     end
-    return out
+    prepend!(out, [Tri(zero(V3), zero(V3), zero(V3), zero(V3))])
+    out
 end
 
 function mesh_to_STri(mesh)::Array{STri}
@@ -183,6 +201,19 @@ function mesh_to_STri(mesh)::Array{STri}
     end
     # prepend degenerate triangle which will alway fail hit tests
     prepend!(out, [STri(zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3))])
+    out
+end
+
+function mesh_to_FTri(mesh)::Array{FTri}
+    out = []
+    for face in mesh
+        (v1, v2, v3) = map(p -> V3(p.position), face.points)
+        (n1, n2, n3) = map(p -> V3(p.normals), face.points)
+        (t1, t2, t3) = map(p -> V3(p.uv..., 0), face.points)
+        push!(out, FTri(cross(v1 - v2, v2 - v3), v1, v2, v3, n1, n2, n3, t1, t2, t3))
+    end
+    # prepend degenerate triangle which will alway fail hit tests
+    prepend!(out, [FTri(zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3))])
     out
 end
 

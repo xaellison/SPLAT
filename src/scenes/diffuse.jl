@@ -7,12 +7,14 @@ include("../tracer.jl")
 include("../cuda.jl")
 function main()
 
-	translate(t, v) = STri(t[1], t[2] - v, t[3] - v, t[4] - v, t[5], t[6], t[7])
+	translate(t :: Tri, v) = Tri(t[1], t[2] - v, t[3] - v, t[4] - v, t[5], t[6], t[7])
+	translate(t :: STri, v) = STri(t[1], t[2] - v, t[3] - v, t[4] - v, t[5], t[6], t[7])
+	translate(t :: FTri, v) = FTri(t[1], t[2] - v, t[3] - v, t[4] - v, t[5], t[6], t[7], t[8], t[9], t[10])
 
-    obj_path = "objs/sphere.obj"
-    tris = mesh_to_STri(load(obj_path))
-	map!(t->translate(t, V3(-10, 0,0)), tris, tris)
-	tris = vcat(tris, mesh_to_STri(load(obj_path)))
+    obj_path = "objs/uvs.obj"
+    tris = mesh_to_FTri(load(obj_path))
+	map!(t->translate(t, V3(-10, 1,0)), tris, tris)
+	tris = vcat(tris, mesh_to_FTri(load(obj_path)))
 	map!(t->translate(t, V3(5,0, 0,)), tris, tris)
 
 	centroid = _centroid(tris)
@@ -20,8 +22,8 @@ function main()
 	println(model_box(tris))
     #tris = parse_obj(obj_path)
     @info "$(length(tris)) triangles"
-    width = 512
-    height = 512#Int(width * 3 / 4)
+    width = 1024
+    height = 1024#Int(width * 3 / 4)
     frame_n = 720
 
 	function moving_camera(frame_i, frame_n)
@@ -61,7 +63,8 @@ function main()
             CUDA.rand,
             CuArray,
 			false,
-			"diffuse/may"
+			"diffuse/may",
+			length(tris) ÷ 2 + 1
         )
 
     println("~fin")

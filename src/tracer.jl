@@ -80,19 +80,19 @@ end
 function evolve_ray(r::ADRay, n, t, rndm, first_diffuse_index)::ADRay
 
     (d, d′), n, t = get_hit((n, t), r)
-
-    if isinf(d)
-        return retired(r)
-    end
-
     if n >= first_diffuse_index
         # compute the position in the new triangle, set dir to zero
         return  ADRay(p(r, d, d′, r.λ),
                      ForwardDiff.derivative(λ->p(r, d, d′, λ), r.λ),
                      zero(V3),
                      zero(V3),
-                     r.in_medium, n, r.dest, r.λ, RAY_STATUS_DIFFUSE)
+                     r.in_medium, n, r.dest, r.λ, true)
     end
+    if isinf(d)
+        return retired(r)
+    end
+
+
 
 
     N(λ) = optical_normal(t, p(r, d, d′, λ))
@@ -121,6 +121,7 @@ function ad_frame_matrix(
     A, # type: either Array or CuArray
     sort_optimization,
     title,
+    first_diffuse,
 ) where T
     camera = camera_generator(1, 1)
 
@@ -144,7 +145,7 @@ function ad_frame_matrix(
         dir = normalize(dir)
         idx = (x - 1) * height + y
         polarization = normalize(cross(camera.up, dir))
-        return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 0, idx, λ, RAY_STATUS_ACTIVE)
+        return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 1, idx, λ, false)
     end
 
     n_tris = collect(zip(map(Int32, collect(1:length(tris))), hit_tris)) |> A |> m -> reshape(m, 1, length(m)) |> A
@@ -186,14 +187,14 @@ function ad_frame_matrix(
             rndm .= random(Float32, length(rays))
             tri_view = @view tris[hit_idx]
             # I need to pass a scalar arg - this closure seems necessary since map! freaks at scalar args
-            evolve_closure(rays, hit_idx, tri_view, rndm) = evolve_ray(rays, hit_idx, tri_view, rndm, 226)
+            evolve_closure(rays, hit_idx, tri_view, rndm) = evolve_ray(rays, hit_idx, tri_view, rndm, first_diffuse)
             map!(evolve_closure, rays, rays, hit_idx, tri_view, rndm)
 
             # retire appropriate rays
             if sort_optimization
                 @info "retirement sort..."
-                sort!(r_view, by=ray->ray.status)
-                cutoff = count(ray->ray.status==RAY_STATUS_ACTIVE, r_view)
+                sort!(r_view, by=ray->ray.retired)
+                cutoff = count(ray->!ray.retired, r_view)
                 cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
             end
         end
@@ -223,9 +224,19 @@ function ad_frame_matrix(
         RGB .= 0.0f0
         for (i, sky) in enumerate(skys)
             # WARNING deleted `r.in_medium ? 0.0f0 : `
-            sky_sample(r, λ, s) = sky(r.dir + r.dir′ * (λ - r.λ), λ, Float32(2 * pi / 20 * frame_i / frame_n)) * s * intensity * dλ
-
-            broadcast = @~ sky_sample.(rays, spectrum, retina_factor)
+            function shade(r, λ, rf, tri)
+                if r.ignore_tri >= first_diffuse && r.ignore_tri != 1
+                    u, v = reverse_uv(r.pos, tri)
+                    if xor(u % 0.1f0 > 0.05f0, v % 0.1f0 > 0.05f0)
+                        return 1.0f0
+                    else
+                        return 0.0f0
+                    end
+                else
+                    return sky(r.dir + r.dir′ * (λ - r.λ), λ, Float32(2 * pi / 20 * frame_i / frame_n)) * rf * intensity * dλ
+                end
+            end
+            broadcast = @~ shade.(rays, spectrum, retina_factor, tris[map(r->r.ignore_tri, rays)])
             RGB = sum(broadcast, dims=3) |> a -> reshape(a, length(rays), 3)
             map!(brightness -> clamp(brightness, 0, 1), RGB, RGB)
         end
