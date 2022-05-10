@@ -92,9 +92,6 @@ function evolve_ray(r::ADRay, n, t, rndm, first_diffuse_index)::ADRay
         return retired(r)
     end
 
-
-
-
     N(λ) = optical_normal(t, p(r, d, d′, λ))
     if r.in_medium
         return handle_optics(r, d, d′, n, N, glass, air, rndm)
@@ -162,6 +159,18 @@ function ad_frame_matrix(
     # Datastruct init
     hits = A{Tuple{Tuple{Float32, Float32}, Int32, T}}(undef, (height* width))
     rndm = random(Float32, width * height)
+
+    # use host to compute constants used in turning spectra into colors
+    spectrum = collect(λ_min:dλ:λ_max) |> a -> reshape(a, 1, 1, length(a))
+    retina_factor = Array{Float32}(undef, 1, 3, length(spectrum))
+    map!(retina_red,begin @view retina_factor[1, 1, :] end, spectrum)
+    map!(retina_green,begin @view retina_factor[1, 2, :] end, spectrum)
+    map!(retina_blue,begin @view retina_factor[1, 3, :] end, spectrum)
+
+    retina_factor=A(retina_factor)
+    spectrum = A(spectrum)
+
+
     synchronize()
     @info "tracing depth = $depth"
     @time for iter = 1:ITERS
@@ -200,25 +209,16 @@ function ad_frame_matrix(
         end
     end
 
-    frame_n = 18
-    @info "images"
-    # output array
-    RGB = A{Float32}(undef, length(rays), 3)
     if sort_optimization
         # restore original order so we can use simple broadcasts to color RGB
         sort!(rays, by=r->r.dest)
     end
-    # use host to compute constants used in turning spectra into colors
-    spectrum = collect(λ_min:dλ:λ_max) |> a -> reshape(a, 1, 1, length(a))
-    retina_factor = Array{Float32}(undef, 1, 3, length(spectrum))
-    r_view = @view retina_factor[1, 1, :]
-    map!(retina_red, r_view, spectrum)
-    g_view = @view retina_factor[1, 2, :]
-    map!(retina_green, g_view, spectrum)
-    b_view = @view retina_factor[1, 3, :]
-    map!(retina_blue, b_view, spectrum)
-    retina_factor=A(retina_factor)
-    spectrum = A(spectrum)
+
+    frame_n = 18
+    @info "images"
+    # output array
+    RGB = A{Float32}(undef, length(rays), 3)
+
 
     @time for frame_i in 1:frame_n
         RGB .= 0.0f0

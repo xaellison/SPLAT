@@ -21,7 +21,6 @@ function next_hit_kernel(rays, tris :: AbstractArray{T}, dest :: AbstractArray{D
             n, t = shmem[scan]
             ####
             d0 = distance_to_plane(r.pos, r.dir, t[2], t[1])
-            d(λ) = distance_to_plane(r.pos + r.pos′ * (λ - r.λ), r.dir + r.dir′ * (λ - r.λ), t[2], t[1])
             p = r.pos + r.dir * d0
             if in_triangle(p, t[2], t[3], t[4]) && min_val > d0 > 0 && r.ignore_tri != n
                 arg_min = n
