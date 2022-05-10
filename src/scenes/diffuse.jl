@@ -13,21 +13,21 @@ function main()
 
     obj_path = "objs/uvs.obj"
     tris = mesh_to_FTri(load(obj_path))
-	map!(t->translate(t, V3(-10, 1,0)), tris, tris)
+	map!(t->translate(t, V3(-7, 0, 0.4)), tris, tris)
 	tris = vcat(tris, mesh_to_FTri(load(obj_path)))
-	map!(t->translate(t, V3(5,0, 0,)), tris, tris)
+	map!(t->translate(t, V3(3.5, 0, -0.2,)), tris, tris)
 
 	centroid = _centroid(tris)
 	println(centroid)
 	println(model_box(tris))
     #tris = parse_obj(obj_path)
     @info "$(length(tris)) triangles"
-    width = 1024
-    height = 1024#Int(width * 3 / 4)
+    width = 512
+    height = 512#Int(width * 3 / 4)
     frame_n = 720
 
 	function moving_camera(frame_i, frame_n)
-		camera_pos = V3((12, 0, 0)) + centroid
+		camera_pos = V3((8, 0, 0)) #+ centroid
 		look_at = zero(V3)
 		up = V3((0.0, 0.0, -1.0))
 		FOV =  45.0 * pi / 180.0
@@ -36,7 +36,7 @@ function main()
 	end
 
     depth = 3
-    dλ = 30
+    dλ = 25
     ITERS = 1
 
     skys = [sky_stripes_down]
@@ -62,7 +62,7 @@ function main()
             0,
             CUDA.rand,
             CuArray,
-			false,
+			true,
 			"diffuse/may",
 			length(tris) ÷ 2 + 1
         )

@@ -37,7 +37,7 @@ function next_hit_kernel(rays, tris :: AbstractArray{T}, dest :: AbstractArray{D
 end
 
 
-function next_hit!(dest :: CuArray{I}, rays, n_tris:: CuArray{Tuple{I, T}}, override) where {I, T}
+function next_hit!(dest :: AnyCuArray{I}, rays, n_tris:: AnyCuArray{Tuple{I, T}}, override) where {I, T}
     block_size = 256
     @assert length(rays) % block_size == 0
     blocks = cld(length(rays), block_size) |> Int

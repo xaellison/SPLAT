@@ -43,22 +43,12 @@ struct ADRay <: AbstractRay
 end
 
 const RAY_STATUS_ACTIVE = UInt8(0)
-const RAY_STATUS_INFINITY = UInt8(1)
-const RAY_STATUS_DIFFUSE = UInt8(2)
+const RAY_STATUS_DIFFUSE = UInt8(1)
+const RAY_STATUS_INFINITY = UInt8(2)
 
-function retired(ray::ADRay)
+function retire(ray::ADRay, status)
     return ADRay(ray.pos, ray.pos′, ray.dir, ray.dir′,
-                 ray.in_medium, ray.ignore_tri, ray.dest, ray.λ, RAY_STATUS_INFINITY)
-end
-
-struct Ray <: AbstractRay
-    pos::V3
-    dir::V3
-    polarization::V3
-    in_medium::Bool
-    ignore_tri::Int
-    dest::Int
-    λ::Float32
+                 ray.in_medium, ray.ignore_tri, ray.dest, ray.λ, status)
 end
 
 struct FastRay <: AbstractRay
@@ -71,44 +61,18 @@ struct FastRay <: AbstractRay
 end
 
 Base.zero(::V3) = V3(0.0f0, 0.0f0, 0.0f0)
-Base.typemax(::Ray) = Ray(zero(V3), zero(V3), zero(V3), false, -1, -1, 0.0f0)
-Base.typemax(::FastRay) = Ray(zero(V3), zero(V3), false, -1, -1, 0.0f0)
-Base.typemax(::STri) =
-    STri(zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3))
-Base.typemax(::Pair{Ray,STri}) = Pair(typemax(Ray), typemax(STri))
-Base.typemax(::Pair{FastRay,STri}) = Pair(typemax(Ray), typemax(STri))
 
+Base.zero(::Type{FastRay}) = FastRay(zero(V3), zero(V3), false, 1, -1, 0.0f0)
 
-function isless(a::Ray, b::Ray)
-    return isless(a.dest, b.dest)
-end
-
-function isless(a::FastRay, b::FastRay)
-    return isless(a.dest, b.dest)
-end
-
-function zero(::Type{Ray})
-    Ray(zero(V3), zero(V3), zero(V3), false, 0, typemax(Int), -1.0f0)
-end
-
-function zero(::Type{FastRay})
-    Ray(zero(V3), zero(V3), false, 0, typemax(Int), -1.0f0)
-end
-
-function one(::Type{Ray})
-    Ray(zero(V3), zero(V3), zero(V3), true, 0, typemax(Int), -1.0f0)
-end
-
-function one(::Type{FastRay})
-    Ray(zero(V3), zero(V3), true, 0, typemax(Int), -1.0f0)
-end
-
-function typemax(::Type{Tuple{Float32,Ray}})
-    return (Inf32, zero(Ray))
-end
-
-function typemax(::Type{Tuple{Float32,FastRay}})
-    return (Inf32, zero(Ray))
+function expand(r :: ADRay, λ :: Float32) :: FastRay
+    return FastRay(
+        r.pos + r.pos′ * (λ - r.λ),
+        r.dir + r.dir′ * (λ - r.λ),
+        r.in_medium,
+        r.ignore_tri,
+        r.dest,
+        λ,
+    )
 end
 
 function rand(::V3)

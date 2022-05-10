@@ -13,7 +13,7 @@ function get_hit(n_t::Tuple{Int32,T}, r::AbstractRay)::Tuple{Float32,Int32,T} wh
     if in_triangle(p, t[2], t[3], t[4]) && d > 0 && r.ignore_tri != n
         return (d, n, t)
     else
-        return (Inf32, typemax(Int32), t)
+        return (Inf32, one(Int32), t)
     end
 end
 
@@ -26,7 +26,7 @@ function get_hit(n_t::Tuple{Int32,T}, r::ADRay)::Tuple{Tuple{Float32,Float32},In
     if in_triangle(p, t[2], t[3], t[4]) && d0 > 0 && r.ignore_tri != n
         return ((d0, ForwardDiff.derivative(d, r.λ)), n, t)
     else
-        return ((Inf32, Inf32), n, t)
+        return ((Inf32, Inf32), one(Int32), t)
     end
 end
 
@@ -78,18 +78,16 @@ function handle_optics(r, d, d′, n, N, n1 :: N1, n2::N2, rndm) where {N1, N2}
 end
 
 function evolve_ray(r::ADRay, n, t, rndm, first_diffuse_index)::ADRay
-
+    if r.status != RAY_STATUS_ACTIVE
+        return r
+    end
     (d, d′), n, t = get_hit((n, t), r)
     if n >= first_diffuse_index
         # compute the position in the new triangle, set dir to zero
-        return  ADRay(p(r, d, d′, r.λ),
-                     ForwardDiff.derivative(λ->p(r, d, d′, λ), r.λ),
-                     zero(V3),
-                     zero(V3),
-                     r.in_medium, n, r.dest, r.λ, RAY_STATUS_DIFFUSE)
+        return retire(r, RAY_STATUS_DIFFUSE)
     end
     if isinf(d)
-        return retired(r)
+        return retire(r, RAY_STATUS_INFINITY)
     end
 
     N(λ) = optical_normal(t, p(r, d, d′, λ))
@@ -98,6 +96,18 @@ function evolve_ray(r::ADRay, n, t, rndm, first_diffuse_index)::ADRay
     else
         return handle_optics(r, d, d′, n, N, air, glass, rndm)
     end
+end
+
+function evolve_ray(r::FastRay, n, t) :: FastRay
+    # evolve to hit a diffuse surface
+    d, n, t = get_hit((n, t), r)
+    return FastRay(r.pos + r.dir * d,
+                   zero(V3),
+                   r.in_medium,
+                   n,
+                   r.dest,
+                   r.λ)
+
 end
 
 
@@ -142,12 +152,11 @@ function ad_frame_matrix(
         dir = normalize(dir)
         idx = (y - 1) * width + x
         polarization = normalize(cross(camera.up, dir))
-        return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 1, idx, λ, false)
+        return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 1, idx, λ, RAY_STATUS_ACTIVE)
     end
 
     n_tris = collect(zip(map(Int32, collect(1:length(tris))), hit_tris)) |> A |> m -> reshape(m, 1, length(m)) |> A
     tris = A(tris)
-    hit_tris = A(hit_tris)
     row_indices = A(1:width)
     col_indices = reshape(A(1:height), 1, height)
     rays = A{ADRay}(undef, height * width)
@@ -157,7 +166,7 @@ function ad_frame_matrix(
 
 
     # Datastruct init
-    hits = A{Tuple{Tuple{Float32, Float32}, Int32, T}}(undef, (height* width))
+    hits = A{Int32}(undef, (height* width))
     rndm = random(Float32, width * height)
 
     # use host to compute constants used in turning spectra into colors
@@ -169,7 +178,9 @@ function ad_frame_matrix(
 
     retina_factor=A(retina_factor)
     spectrum = A(spectrum)
-
+    # TODO: fix copy zeros
+    diffuse_breakout =  A(zeros(FastRay, length(rays), 1, length(spectrum))) #|> a -> reshape(a, length(a))
+    diffuse_hits = A{Int32}(undef, length(rays), 1, length(spectrum)) #|> a -> reshape(a, length(a))
 
     synchronize()
     @info "tracing depth = $depth"
@@ -209,39 +220,74 @@ function ad_frame_matrix(
         end
     end
 
-    if sort_optimization
-        # restore original order so we can use simple broadcasts to color RGB
-        sort!(rays, by=r->r.dest)
-    end
 
+    active_ray_count = count(ray->ray.status==RAY_STATUS_ACTIVE, rays)
+    diffuse_ray_count = count(ray->ray.status==RAY_STATUS_DIFFUSE, rays)
+    infinity_ray_count = count(ray->ray.status==RAY_STATUS_INFINITY, rays)
+    @info "Ray status count: active = $active_ray_count, diffuse = $diffuse_ray_count, inf = $infinity_ray_count"
+    @assert active_ray_count + diffuse_ray_count + infinity_ray_count == length(rays)
+
+    # AD Rays
+    diffuse_ray_count_adj =  min(length(rays), diffuse_ray_count + 256 - diffuse_ray_count % 256)
+    diffuse_src_view = @view rays[active_ray_count+1:active_ray_count+diffuse_ray_count_adj]
+    # Fast Rays from sampling taylor of AD Ray
+    diffuse_dest_view = @view diffuse_breakout[1:diffuse_ray_count_adj, :, :]
+    diffuse_dest_view .= expand.(diffuse_src_view, spectrum)
+
+
+    # 2D view of hits
+    hit_view = @view diffuse_hits[1:diffuse_ray_count_adj, :, :]
+
+    next_hit!(hit_view, diffuse_dest_view, n_tris, false)
+    diffuse_dest_view = @view diffuse_dest_view[1:diffuse_ray_count, :, :]
+    hit_view = @view hit_view[1:diffuse_ray_count, :, :]
+    tri_view = @view tris[hit_view]
+    map!(evolve_ray, diffuse_dest_view, diffuse_dest_view, hit_view, tri_view)
     frame_n = 18
     @info "images"
     # output array
     RGB = A{Float32}(undef, length(rays), 3)
 
-    active_ray_count = count(ray->ray.status==RAY_STATUS_ACTIVE, rays)
-    diffuse_ray_count = count(ray->ray.status==RAY_STATUS_DIFFUSE, rays)
-    infinity_ray_count = count(ray->ray.status==RAY_STATUS_INFINITY, rays)
-    @assert active_ray_count + diffuse_ray_count + infinity_ray_count == length(rays)
+    if sort_optimization
+        # restore original order so we can use simple broadcasts to color RGB
+        sort!(rays, by=r->r.dest)
+    end
 
-    @time for frame_i in 1:frame_n
+     for frame_i in 1:frame_n
         RGB .= 0.0f0
         for (i, sky) in enumerate(skys)
             # WARNING deleted `r.in_medium ? 0.0f0 : `
-            function shade(r, λ, rf, tri)
-                if r.status==RAY_STATUS_DIFFUSE
-                    u, v = reverse_uv(r.pos, tri)
-                    if xor(u % 0.1f0 > 0.05f0, v % 0.1f0 > 0.05f0)
-                        return 1.0f0
-                    else
-                        return 0.0f0
-                    end
-                else
+            function shade_inf(r, λ, rf)
+                if r.status == RAY_STATUS_INFINITY
                     return sky(r.dir + r.dir′ * (λ - r.λ), λ, Float32(2 * pi / 20 * frame_i / frame_n)) * rf * intensity * dλ
+                else
+                    return 0.0f0
                 end
             end
-            broadcast = @~ shade.(rays, spectrum, retina_factor, tris[map(r->r.ignore_tri, rays)])
-            RGB = sum(broadcast, dims=3) |> a -> reshape(a, length(rays), 3)
+
+            function shade_diffuse(r, λ, rf, tri)
+                u, v = reverse_uv(r.pos, tri)
+                if xor(u % 0.1f0 > 0.05f0, v % 0.1f0 > 0.05f0)
+                    return 1.0f0 * rf * intensity * dλ
+                else
+                    return 0.0f0
+                end
+            end
+
+            broadcast = @~ shade_inf.(rays, spectrum, retina_factor)
+            d_t_v = @view tris[map(r->r.ignore_tri, diffuse_dest_view)]
+            diffuse_b = @~ shade_diffuse.(diffuse_dest_view, spectrum, retina_factor, d_t_v)
+            aux_RGB = sum(diffuse_b, dims=3)
+            tmp = @view diffuse_dest_view[:, :, 1]
+            aux_idx = map(r->r.dest, tmp)
+
+            color_v = @view RGB[:, 1]
+            color_v[aux_idx] .= aux_RGB[:, 1]
+            color_v = @view RGB[:, 2]
+            color_v[aux_idx] .= aux_RGB[:, 2]
+            color_v = @view RGB[:,3]
+            color_v[aux_idx] .= aux_RGB[:, 3]
+            RGB += sum(broadcast, dims=3)  |> a -> reshape(a, length(rays), 3)
             map!(brightness -> clamp(brightness, 0, 1), RGB, RGB)
         end
 
