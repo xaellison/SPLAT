@@ -39,12 +39,16 @@ struct ADRay <: AbstractRay
     ignore_tri::Int
     dest::Int
     λ::Float32
-    retired::Bool
+    status::UInt8
 end
+
+const RAY_STATUS_ACTIVE = UInt8(0)
+const RAY_STATUS_INFINITY = UInt8(1)
+const RAY_STATUS_DIFFUSE = UInt8(2)
 
 function retired(ray::ADRay)
     return ADRay(ray.pos, ray.pos′, ray.dir, ray.dir′,
-                 ray.in_medium, ray.ignore_tri, ray.dest, ray.λ, true)
+                 ray.in_medium, ray.ignore_tri, ray.dest, ray.λ, RAY_STATUS_INFINITY)
 end
 
 struct Ray <: AbstractRay

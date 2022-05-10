@@ -66,14 +66,14 @@ function handle_optics(r, d, d′, n, N, n1 :: N1, n2::N2, rndm) where {N1, N2}
                      ForwardDiff.derivative(λ->p(r, d, d′, λ), r.λ),
                      refract(r.dir, N(r.λ), n1(r.λ), n2(r.λ)),
                      ForwardDiff.derivative(λ -> refract(r.dir + r.dir′ * (λ - r.λ), N(r.λ), n1(λ), n2(λ)), r.λ),
-                     !r.in_medium, n, r.dest, r.λ, false)
+                     !r.in_medium, n, r.dest, r.λ, RAY_STATUS_ACTIVE)
 
     else
         return ADRay(p(r, d, d′, r.λ),
                      ForwardDiff.derivative(λ->p(r, d, d′, λ), r.λ),
                      reflect(r.dir, N(r.λ)),
                      ForwardDiff.derivative(λ -> reflect(r.dir + r.dir′ * (λ - r.λ), N(λ)), r.λ),
-                     r.in_medium, n, r.dest, r.λ, false)
+                     r.in_medium, n, r.dest, r.λ, RAY_STATUS_ACTIVE)
     end
 end
 
@@ -86,7 +86,7 @@ function evolve_ray(r::ADRay, n, t, rndm, first_diffuse_index)::ADRay
                      ForwardDiff.derivative(λ->p(r, d, d′, λ), r.λ),
                      zero(V3),
                      zero(V3),
-                     r.in_medium, n, r.dest, r.λ, true)
+                     r.in_medium, n, r.dest, r.λ, RAY_STATUS_DIFFUSE)
     end
     if isinf(d)
         return retired(r)
@@ -140,7 +140,7 @@ function ad_frame_matrix(
             _z * camera.dir +
             dv * 0.25f0 / max(width, height)
         dir = normalize(dir)
-        idx = (x - 1) * height + y
+        idx = (y - 1) * width + x
         polarization = normalize(cross(camera.up, dir))
         return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 1, idx, λ, false)
     end
@@ -163,9 +163,9 @@ function ad_frame_matrix(
     # use host to compute constants used in turning spectra into colors
     spectrum = collect(λ_min:dλ:λ_max) |> a -> reshape(a, 1, 1, length(a))
     retina_factor = Array{Float32}(undef, 1, 3, length(spectrum))
-    map!(retina_red,begin @view retina_factor[1, 1, :] end, spectrum)
-    map!(retina_green,begin @view retina_factor[1, 2, :] end, spectrum)
-    map!(retina_blue,begin @view retina_factor[1, 3, :] end, spectrum)
+    map!(retina_red, begin @view retina_factor[1, 1, :] end, spectrum)
+    map!(retina_green, begin @view retina_factor[1, 2, :] end, spectrum)
+    map!(retina_blue, begin @view retina_factor[1, 3, :] end, spectrum)
 
     retina_factor=A(retina_factor)
     spectrum = A(spectrum)
@@ -202,8 +202,8 @@ function ad_frame_matrix(
             # retire appropriate rays
             if sort_optimization
                 @info "retirement sort..."
-                sort!(r_view, by=ray->ray.retired)
-                cutoff = count(ray->!ray.retired, r_view)
+                sort!(r_view, by=ray->ray.status)
+                cutoff = count(ray->ray.status==RAY_STATUS_ACTIVE, r_view)
                 cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
             end
         end
@@ -219,13 +219,17 @@ function ad_frame_matrix(
     # output array
     RGB = A{Float32}(undef, length(rays), 3)
 
+    active_ray_count = count(ray->ray.status==RAY_STATUS_ACTIVE, rays)
+    diffuse_ray_count = count(ray->ray.status==RAY_STATUS_DIFFUSE, rays)
+    infinity_ray_count = count(ray->ray.status==RAY_STATUS_INFINITY, rays)
+    @assert active_ray_count + diffuse_ray_count + infinity_ray_count == length(rays)
 
     @time for frame_i in 1:frame_n
         RGB .= 0.0f0
         for (i, sky) in enumerate(skys)
             # WARNING deleted `r.in_medium ? 0.0f0 : `
             function shade(r, λ, rf, tri)
-                if r.ignore_tri >= first_diffuse && r.ignore_tri != 1
+                if r.status==RAY_STATUS_DIFFUSE
                     u, v = reverse_uv(r.pos, tri)
                     if xor(u % 0.1f0 > 0.05f0, v % 0.1f0 > 0.05f0)
                         return 1.0f0
