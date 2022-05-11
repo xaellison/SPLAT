@@ -16,14 +16,12 @@ function main()
 	tris = mesh_to_FTri(load(obj_path))
 	c = _centroid(tris)
 	map!(t->translate(t, V3(3.0, 0, 0.0) - c), tris, tris)
-	V = V3(0, 2, 3)
+	V = V3(0, cos(2 * pi * frame_i / frame_n), sin(2 * pi * frame_i / frame_n)) * 0.6
 	meshes = [tris]
-	for i in -2:3
-		tris = mesh_to_FTri(load(obj_path))
-		c = _centroid(tris)
-		map!(t->translate(t, V3(-3.0, 0, 0.0) + V * (i - (frame_i-1)/( frame_n - 1)) - c), tris, tris)
-		push!(meshes, tris)
-	end
+	tris = mesh_to_FTri(load(obj_path))
+	c = _centroid(tris)
+	map!(t->translate(t, V3(-3.0, 0, 0.0) + V - c), tris, tris)
+	push!(meshes, tris)
 	tris = foldl(vcat, meshes)
 
 	centroid = _centroid(tris)

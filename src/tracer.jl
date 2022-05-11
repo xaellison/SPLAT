@@ -112,7 +112,7 @@ function shade(r::FastRay, n, t, first_diffuse_index) :: Float32
     if n >= first_diffuse_index
        # compute the position in the new triangle, set dir to zero
        u, v = reverse_uv(r.pos, t)
-       s = 0.05f0
+       s = 0.1f0
        if xor(u % s > s / 2, v % s > s / 2)
            return 1.0f0
        else
@@ -244,11 +244,7 @@ function ad_frame_matrix(
     # NB: we should also expand rays that have been dispersed AND go to infinity - the may have fringe intersections
     begin
         CUDA.@time begin
-            active_ray_count = count(ray->ray.status==RAY_STATUS_ACTIVE, rays)
             diffuse_ray_count = count(ray->ray.status==RAY_STATUS_DIFFUSE, rays)
-            infinity_ray_count = count(ray->ray.status==RAY_STATUS_INFINITY, rays)
-            @info "Ray status count: active = $active_ray_count, diffuse = $diffuse_ray_count, inf = $infinity_ray_count"
-            @assert active_ray_count + diffuse_ray_count + infinity_ray_count == length(rays)
             # AD Rays
             diffuse_ray_count_adj =  min(length(rays), diffuse_ray_count + 256 - diffuse_ray_count % 256)
             s_i = map(r->(r.status, r.dest), rays)
@@ -259,7 +255,7 @@ function ad_frame_matrix(
 
         end
         CUDA.@time begin
-            iv = @view i[active_ray_count+1:active_ray_count+diffuse_ray_count_adj]
+            iv = @view i[1:diffuse_ray_count_adj]
             expansion = expand.(rays, spectrum)
             # TODO: dont move ones
             hits = A(ones(Int32, size(expansion)))
@@ -279,7 +275,7 @@ function ad_frame_matrix(
     RGB = A{Float32}(undef, length(rays), 3)
 
 
-    @time for frame_i in 1:frame_n
+    @time begin
         RGB .= 0.0f0
         for (i, sky) in enumerate(skys)
             # WARNING deleted `r.in_medium ? 0.0f0 : `
@@ -303,7 +299,7 @@ function ad_frame_matrix(
         for s in keys(skys)
 
             img = RGBf.(map(a -> reshape(Array(a), height, width), (RGB[:, 1], RGB[:, 2], RGB[:, 3]))...)
-            Makie.save("out/$title/$(lpad(frame_i, 3, "0")).png", img)
+            Makie.save("out/$title.png", img)
 
         end
     end
