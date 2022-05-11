@@ -98,16 +98,30 @@ function evolve_ray(r::ADRay, n, t, rndm, first_diffuse_index)::ADRay
     end
 end
 
-function evolve_ray(r::FastRay, n, t) :: FastRay
+function shade(r::FastRay, n, t, first_diffuse_index) :: Float32
     # evolve to hit a diffuse surface
     d, n, t = get_hit((n, t), r)
-    return FastRay(r.pos + r.dir * d,
+
+    r = FastRay(r.pos + r.dir * d,
                    zero(V3),
                    r.in_medium,
                    n,
                    r.dest,
                    r.λ)
 
+    if n >= first_diffuse_index
+       # compute the position in the new triangle, set dir to zero
+       u, v = reverse_uv(r.pos, t)
+       if xor(u % 0.1f0 > 0.05f0, v % 0.1f0 > 0.05f0)
+           return 1.0f0
+       else
+           return 0.0f0
+       end
+    end
+    if isinf(d)
+       return 0.0f0# retire(r, RAY_STATUS_INFINITY)
+    end
+    return 1.0f0
 end
 
 
@@ -135,7 +149,7 @@ function ad_frame_matrix(
     #out .= RGBf(0, 0, 0)
     λ_min = 400.0f0
     λ_max = 700.0f0
-    intensity = Float32(1 / ITERS) * 2
+    intensity = Float32(1 / ITERS * 1 / (λ_max - λ_min))
 
     function init_ray(x, y, λ, dv)::AbstractRay
         _x, _y = x - width / 2, y - height / 2
@@ -183,7 +197,7 @@ function ad_frame_matrix(
     diffuse_hits = A{Int32}(undef, length(rays), 1, length(spectrum)) #|> a -> reshape(a, length(a))
 
     synchronize()
-    @info "tracing depth = $depth"
+    @info "Stage 1: AD tracing depth = $depth"
     @time for iter = 1:ITERS
 
         dv .=
@@ -221,30 +235,17 @@ function ad_frame_matrix(
     end
 
 
-    active_ray_count = count(ray->ray.status==RAY_STATUS_ACTIVE, rays)
-    diffuse_ray_count = count(ray->ray.status==RAY_STATUS_DIFFUSE, rays)
-    infinity_ray_count = count(ray->ray.status==RAY_STATUS_INFINITY, rays)
-    @info "Ray status count: active = $active_ray_count, diffuse = $diffuse_ray_count, inf = $infinity_ray_count"
-    @assert active_ray_count + diffuse_ray_count + infinity_ray_count == length(rays)
+    @info "Stage 2: Expansion"
+    @time begin
+        expansion = expand.(rays, spectrum)
+        hits = A{Int32}(undef, size(expansion))
+        next_hit!(hits, expansion, n_tris, false)
+        tri_view = @view tris[hits]
+    end
+    #map!(evolve_ray, expansion, expansion, hits, tri_view)
 
-    # AD Rays
-    diffuse_ray_count_adj =  min(length(rays), diffuse_ray_count + 256 - diffuse_ray_count % 256)
-    diffuse_src_view = @view rays[active_ray_count+1:active_ray_count+diffuse_ray_count_adj]
-    # Fast Rays from sampling taylor of AD Ray
-    diffuse_dest_view = @view diffuse_breakout[1:diffuse_ray_count_adj, :, :]
-    diffuse_dest_view .= expand.(diffuse_src_view, spectrum)
-
-
-    # 2D view of hits
-    hit_view = @view diffuse_hits[1:diffuse_ray_count_adj, :, :]
-
-    next_hit!(hit_view, diffuse_dest_view, n_tris, false)
-    diffuse_dest_view = @view diffuse_dest_view[1:diffuse_ray_count, :, :]
-    hit_view = @view hit_view[1:diffuse_ray_count, :, :]
-    tri_view = @view tris[hit_view]
-    map!(evolve_ray, diffuse_dest_view, diffuse_dest_view, hit_view, tri_view)
     frame_n = 18
-    @info "images"
+    @info "Stage 3: Images"
     # output array
     RGB = A{Float32}(undef, length(rays), 3)
 
@@ -253,7 +254,7 @@ function ad_frame_matrix(
         sort!(rays, by=r->r.dest)
     end
 
-     for frame_i in 1:frame_n
+    @time for frame_i in 1:frame_n
         RGB .= 0.0f0
         for (i, sky) in enumerate(skys)
             # WARNING deleted `r.in_medium ? 0.0f0 : `
@@ -265,23 +266,9 @@ function ad_frame_matrix(
                 end
             end
 
-            function shade_diffuse(r, λ, rf, tri)
-                u, v = reverse_uv(r.pos, tri)
-                if xor(u % 0.1f0 > 0.05f0, v % 0.1f0 > 0.05f0)
-                    return 1.0f0 * rf * intensity * dλ
-                else
-                    return 0.0f0
-                end
-            end
-
-            broadcast = @~ shade_inf.(rays, spectrum, retina_factor)
-            d_t_v = @view tris[map(r->r.ignore_tri, diffuse_dest_view)]
-            diffuse_b = @~ shade_diffuse.(diffuse_dest_view, spectrum, retina_factor, d_t_v)
-            aux_RGB = sum(diffuse_b, dims=3)
-            tmp = @view diffuse_dest_view[:, :, 1]
-            aux_idx = map(r->r.dest, tmp)
-
-            RGB[CartesianIndex.(aux_idx, [1 2 3] |> CuArray)] .= aux_RGB
+            # * rf * intensity * dλ
+            α = shade.(expansion, hits, tri_view, first_diffuse)
+            broadcast = @~ (α .* spectrum .* retina_factor .* intensity .* dλ)
 
             RGB += sum(broadcast, dims=3)  |> a -> reshape(a, length(rays), 3)
             map!(brightness -> clamp(brightness, 0, 1), RGB, RGB)

@@ -62,7 +62,7 @@ function main()
             0,
             CUDA.rand,
             CuArray,
-			true,
+			false,
 			"diffuse/may",
 			length(tris) ÷ 2 + 1
         )
