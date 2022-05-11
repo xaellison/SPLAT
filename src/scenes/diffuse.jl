@@ -7,27 +7,29 @@ include("../tracer.jl")
 include("../cuda.jl")
 function main()
 
-	translate(t :: Tri, v) = Tri(t[1], t[2] - v, t[3] - v, t[4] - v, t[5], t[6], t[7])
-	translate(t :: STri, v) = STri(t[1], t[2] - v, t[3] - v, t[4] - v, t[5], t[6], t[7])
-	translate(t :: FTri, v) = FTri(t[1], t[2] - v, t[3] - v, t[4] - v, t[5], t[6], t[7], t[8], t[9], t[10])
+	translate(t :: Tri, v) = Tri(t[1], t[2] + v, t[3] + v, t[4] + v, t[5], t[6], t[7])
+	translate(t :: STri, v) = STri(t[1], t[2] + v, t[3] + v, t[4] + v, t[5], t[6], t[7])
+	translate(t :: FTri, v) = FTri(t[1], t[2] + v, t[3] + v, t[4] + v, t[5], t[6], t[7], t[8], t[9], t[10])
 
     obj_path = "objs/uvs.obj"
     tris = mesh_to_FTri(load(obj_path))
-	map!(t->translate(t, V3(-7, 0, 0.4)), tris, tris)
-	tris = vcat(tris, mesh_to_FTri(load(obj_path)))
-	map!(t->translate(t, V3(3.5, 0, -0.2,)), tris, tris)
+	c = _centroid(tris)
+	map!(t->translate(t, V3(3.0, 0, 0.0) - c), tris, tris)
+	tris2 =  mesh_to_FTri(load(obj_path))
+	map!(t->translate(t, V3(-3.0, 0.4, 0.6) - c), tris2, tris2)
+	tris = vcat(tris, tris2)
 
 	centroid = _centroid(tris)
 	println(centroid)
 	println(model_box(tris))
     #tris = parse_obj(obj_path)
     @info "$(length(tris)) triangles"
-    width = 512
-    height = 512#Int(width * 3 / 4)
+    width = 2048
+    height = 2048#6#Int(width * 3 / 4)
     frame_n = 720
 
 	function moving_camera(frame_i, frame_n)
-		camera_pos = V3((8, 0, 0)) #+ centroid
+		camera_pos = V3((7, 0, 0)) #+ centroid
 		look_at = zero(V3)
 		up = V3((0.0, 0.0, -1.0))
 		FOV =  45.0 * pi / 180.0
@@ -36,7 +38,7 @@ function main()
 	end
 
     depth = 3
-    dλ = 25
+    dλ = 50.0f0
     ITERS = 1
 
     skys = [sky_stripes_down]
@@ -44,7 +46,7 @@ function main()
 
 		R = rotation_matrix(V3(1, 1, 1), 2 * pi * 0 / frame_n)
 
-		tris′ = map(t -> translate(t, -centroid ), tris)
+		tris′ = map(t -> translate(t, V3(0,0,0) ), tris)
 		println(model_box(tris′))
         tris′ = map(t -> map(v -> R * v, t), tris′)
 		hit_tris = map(t->Tri(t[1:4]...), tris′)
