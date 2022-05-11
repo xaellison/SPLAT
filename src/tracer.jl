@@ -281,12 +281,8 @@ function ad_frame_matrix(
             tmp = @view diffuse_dest_view[:, :, 1]
             aux_idx = map(r->r.dest, tmp)
 
-            color_v = @view RGB[:, 1]
-            color_v[aux_idx] .= aux_RGB[:, 1]
-            color_v = @view RGB[:, 2]
-            color_v[aux_idx] .= aux_RGB[:, 2]
-            color_v = @view RGB[:,3]
-            color_v[aux_idx] .= aux_RGB[:, 3]
+            RGB[CartesianIndex.(aux_idx, [1 2 3] |> CuArray)] .= aux_RGB
+
             RGB += sum(broadcast, dims=3)  |> a -> reshape(a, length(rays), 3)
             map!(brightness -> clamp(brightness, 0, 1), RGB, RGB)
         end
