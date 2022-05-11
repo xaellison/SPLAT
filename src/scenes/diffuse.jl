@@ -24,8 +24,8 @@ function main()
 	println(model_box(tris))
     #tris = parse_obj(obj_path)
     @info "$(length(tris)) triangles"
-    width = 2048
-    height = 2048#6#Int(width * 3 / 4)
+    width = 1024
+    height = 1024#Int(width * 3 / 4)
     frame_n = 720
 
 	function moving_camera(frame_i, frame_n)
@@ -38,7 +38,7 @@ function main()
 	end
 
     depth = 3
-    dλ = 50.0f0
+    dλ = 25.0f0
     ITERS = 1
 
     skys = [sky_stripes_down]

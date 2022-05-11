@@ -112,7 +112,8 @@ function shade(r::FastRay, n, t, first_diffuse_index) :: Float32
     if n >= first_diffuse_index
        # compute the position in the new triangle, set dir to zero
        u, v = reverse_uv(r.pos, t)
-       if xor(u % 0.1f0 > 0.05f0, v % 0.1f0 > 0.05f0)
+       s = 0.05f0
+       if xor(u % s > s / 2, v % s > s / 2)
            return 1.0f0
        else
            return 0.0f0
@@ -121,7 +122,7 @@ function shade(r::FastRay, n, t, first_diffuse_index) :: Float32
     if isinf(d)
        return 0.0f0# retire(r, RAY_STATUS_INFINITY)
     end
-    return 1.0f0
+    return 0.0f0
 end
 
 
@@ -198,7 +199,7 @@ function ad_frame_matrix(
 
     synchronize()
     @info "Stage 1: AD tracing depth = $depth"
-    @time for iter = 1:ITERS
+    @time begin
 
         dv .=
             V3.(
@@ -232,27 +233,51 @@ function ad_frame_matrix(
                 cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
             end
         end
+
+        if sort_optimization
+            # restore original order so we can use simple broadcasts to color RGB
+            sort!(rays, by=r->r.dest)
+        end
     end
 
+    @info "Stage 2: Expansion (optimization then evaluation)"
+    # NB: we should also expand rays that have been dispersed AND go to infinity - the may have fringe intersections
+    begin
+        CUDA.@time begin
+            active_ray_count = count(ray->ray.status==RAY_STATUS_ACTIVE, rays)
+            diffuse_ray_count = count(ray->ray.status==RAY_STATUS_DIFFUSE, rays)
+            infinity_ray_count = count(ray->ray.status==RAY_STATUS_INFINITY, rays)
+            @info "Ray status count: active = $active_ray_count, diffuse = $diffuse_ray_count, inf = $infinity_ray_count"
+            @assert active_ray_count + diffuse_ray_count + infinity_ray_count == length(rays)
+            # AD Rays
+            diffuse_ray_count_adj =  min(length(rays), diffuse_ray_count + 256 - diffuse_ray_count % 256)
+            s_i = map(r->(r.status, r.dest), rays)
+            CUDA.@sync sort!(s_i, alg=CUDA.QuickSortAlg())
+            i = map(p->p[2], s_i)
+            # this prints just before @time exits
+            @info "Optimization reduced expansion work to $(diffuse_ray_count_adj / length(rays) * 100)% of original"
 
-    @info "Stage 2: Expansion"
-    @time begin
-        expansion = expand.(rays, spectrum)
-        hits = A{Int32}(undef, size(expansion))
-        next_hit!(hits, expansion, n_tris, false)
-        tri_view = @view tris[hits]
+        end
+        CUDA.@time begin
+            iv = @view i[active_ray_count+1:active_ray_count+diffuse_ray_count_adj]
+            expansion = expand.(rays, spectrum)
+            # TODO: dont move ones
+            hits = A(ones(Int32, size(expansion)))
+            spectrum_indices = reshape(CuArray(1:length(spectrum)), size(spectrum))
+
+            hits_view = @view hits[CartesianIndex.(iv, 1, spectrum_indices)]
+            expansion_view = @view expansion[CartesianIndex.(iv, 1, spectrum_indices)]
+            next_hit!(hits_view, expansion_view, n_tris, false)
+            tri_view = @view tris[hits]
+        end
     end
     #map!(evolve_ray, expansion, expansion, hits, tri_view)
 
-    frame_n = 18
+    frame_n = 1
     @info "Stage 3: Images"
     # output array
     RGB = A{Float32}(undef, length(rays), 3)
 
-    if sort_optimization
-        # restore original order so we can use simple broadcasts to color RGB
-        sort!(rays, by=r->r.dest)
-    end
 
     @time for frame_i in 1:frame_n
         RGB .= 0.0f0
