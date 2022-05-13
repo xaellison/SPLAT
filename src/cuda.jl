@@ -19,8 +19,7 @@ end
 
 function next_hit!(dest :: AnyCuArray{I}, rays, n_tris:: AnyCuArray{Tuple{I, T}}, override) where {I, T}
 
-  @tullio (min) tmp[i] := k(n_tris[j], rays[i])
-  @info (size(dest), size(tmp))
+  @tullio (min) tmp[i] := hit_argmin(n_tris[j], rays[i])
   d_view = @view dest[:]
   d_view = reshape(d_view, length(d_view))
   d_view .= map(x->x[2], tmp)
