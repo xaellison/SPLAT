@@ -5,6 +5,31 @@ using ForwardDiff
 using Makie
 using ProgressMeter
 using Serialization
+function get_hit(n_s::Tuple{Int32, Sphere}, r::AbstractRay)
+    # https://en.wikipedia.org/wiki/Line%E2%80%93sphere_intersection
+    n, s = n_s
+    if s.radius <= 0
+        return (Inf32, one(Int32), s)
+    end
+    d = distance_to_sphere(r.pos, r.dir, s)
+    if isinf(d)
+        return (Inf32, one(Int32), s)
+    end
+    return (d, n, s)
+end
+
+function get_hit(n_s::Tuple{Int32, Sphere}, r::ADRay)
+    n, s = n_s
+    if s.radius <= 0
+        return ((Inf32, Inf32), one(Int32), s)
+    end
+    d0 = distance_to_sphere(r.pos, r.dir, s)
+    d(λ) = distance_to_sphere(r.pos + (λ - r.λ) * r.pos′, r.dir + (λ - r.λ) * r.dir′, s)
+    if isinf(d0)
+        return ((Inf32, Inf32), one(Int32), s)
+    end
+    return ((d0, ForwardDiff.derivative(d, r.λ)), n, s)
+end
 
 function get_hit(n_t::Tuple{Int32,T}, r::AbstractRay)::Tuple{Float32,Int32,T} where {T}
     n, t = n_t
@@ -31,22 +56,27 @@ function get_hit(n_t::Tuple{Int32,T}, r::ADRay)::Tuple{Tuple{Float32,Float32},In
 end
 
 ## Hit computers for AD  Rays
-
-
+#"""
 function next_hit!(dest :: AbstractArray{I}, rays, n_tris:: AbstractArray{Tuple{I, T}}, override=false) where {I, T}
     for i in 1:length(dest)
-        if !rays[i].retired || override
-            dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i]), n_tris, init=((Inf32, Inf32), typemax(Int32), zero(T)))[2]
-            if dest[i] == typemax(I)
-                dest[i] = one(I)
-            end
-        else
-            dest[i] = one(Int32)
-        end
+
+        dest[i] = minimum(n_tri -> hit_argmin(n_tri, rays[i]), n_tris, init=(Inf32, one(I)))[2]
+
     end
     return nothing
 end
 
+function next_hit!(dest :: AbstractArray{I}, rays :: AbstractArray{ADRay}, n_tris:: AbstractArray{Tuple{I, T}}, override=false) where {I, T}
+    for i in 1:length(dest)
+        if rays[i].status == RAY_STATUS_ACTIVE || override
+            dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i])[1:2], n_tris, init=((Inf32, Inf32), one(I)))[2]
+        else
+            dest[i] = one(I)
+        end
+    end
+    return nothing
+end
+#"""
 ## Ray evolvers
 
 
@@ -132,7 +162,7 @@ function ad_frame_matrix(
     camera_generator::Function,
     width::Int,
     height::Int,
-    hit_tris::AbstractArray{Tri},
+    #hit_tris::AbstractArray{Tri},
     tris::AbstractArray{T},
     skys,
     dλ,
@@ -170,7 +200,7 @@ function ad_frame_matrix(
         return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 1, idx, λ, RAY_STATUS_ACTIVE)
     end
 
-    n_tris = collect(zip(map(Int32, collect(1:length(tris))), hit_tris)) |> A |> m -> reshape(m, 1, length(m)) |> A
+    n_tris = collect(zip(map(Int32, collect(1:length(tris))), tris)) |> A |> m -> reshape(m, 1, length(m)) |> A
     tris = A(tris)
     row_indices = A(1:width)
     col_indices = reshape(A(1:height), 1, height)
@@ -193,13 +223,10 @@ function ad_frame_matrix(
 
     retina_factor=A(retina_factor)
     spectrum = A(spectrum)
-    # TODO: fix copy zeros
-    diffuse_breakout =  A(zeros(FastRay, length(rays), 1, length(spectrum))) #|> a -> reshape(a, length(a))
-    diffuse_hits = A{Int32}(undef, length(rays), 1, length(spectrum)) #|> a -> reshape(a, length(a))
 
     synchronize()
     @info "Stage 1: AD tracing depth = $depth"
-    @time begin
+    begin
 
         dv .=
             V3.(
@@ -243,29 +270,13 @@ function ad_frame_matrix(
     @info "Stage 2: Expansion (optimization then evaluation)"
     # NB: we should also expand rays that have been dispersed AND go to infinity - the may have fringe intersections
     begin
-        CUDA.@time begin
-            diffuse_ray_count = count(ray->ray.status==RAY_STATUS_DIFFUSE, rays)
-            # AD Rays
-            diffuse_ray_count_adj =  min(length(rays), diffuse_ray_count + 256 - diffuse_ray_count % 256)
-            s_i = map(r->(r.status, r.dest), rays)
-            CUDA.@sync sort!(s_i, alg=CUDA.QuickSortAlg())
-            i = map(p->p[2], s_i)
-            # this prints just before @time exits
-            @info "Optimization reduced expansion work to $(diffuse_ray_count_adj / length(rays) * 100)% of original"
 
-        end
-        CUDA.@time begin
-            iv = @view i[1:diffuse_ray_count_adj]
             expansion = expand.(rays, spectrum)
             # TODO: dont move ones
             hits = A(ones(Int32, size(expansion)))
-            spectrum_indices = reshape(CuArray(1:length(spectrum)), size(spectrum))
-
-            hits_view = @view hits[CartesianIndex.(iv, 1, spectrum_indices)]
-            expansion_view = @view expansion[CartesianIndex.(iv, 1, spectrum_indices)]
-            next_hit!(hits_view, expansion_view, n_tris, false)
+            next_hit!(hits, expansion, n_tris, false)
             tri_view = @view tris[hits]
-        end
+
     end
     #map!(evolve_ray, expansion, expansion, hits, tri_view)
 
@@ -275,7 +286,7 @@ function ad_frame_matrix(
     RGB = A{Float32}(undef, length(rays), 3)
 
 
-    @time begin
+    begin
         RGB .= 0.0f0
         for (i, sky) in enumerate(skys)
             # WARNING deleted `r.in_medium ? 0.0f0 : `

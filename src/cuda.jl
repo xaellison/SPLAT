@@ -17,7 +17,7 @@ function hit_argmin(n_t, r::FastRay) :: Tuple{Float32, Int32}
     return get_hit(n_t, r)[1:2]
 end
 
-function next_hit!(dest :: AnyCuArray{I}, rays, n_tris:: AnyCuArray{Tuple{I, T}}, override) where {I, T}
+function next_hit!(dest :: AnyCuArray, rays:: AnyCuArray, n_tris:: AnyCuArray, override)
 
   @tullio (min) tmp[i] := hit_argmin(n_tris[j], rays[i])
   d_view = @view dest[:]
