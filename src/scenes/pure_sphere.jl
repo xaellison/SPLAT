@@ -9,8 +9,8 @@ function main()
 	frame_n = 5
 	for frame_i in 1:frame_n
 
-    width = 1024
-    height = 1024#Int(width * 3 / 4)
+    width = 1280
+    height = 720#Int(width * 3 / 4)
 
 
 	function moving_camera(frame_i, frame_n)
@@ -22,7 +22,7 @@ function main()
 		return get_camera(camera_pos, look_at, up, FOV)
 	end
 
-    depth = 3
+    depth = 2
     dλ = 25.0f0
     ITERS = 1
 
@@ -36,7 +36,6 @@ function main()
             height,
 			#hit_tris,
             [Sphere(zero(V3), 0.0f0), Sphere(V3(3, 0, 0), 1.0f0), Sphere(V3(-3, 0.4, 0.6), 1.0f0)],
-            skys,
             dλ,
             depth,
             ITERS,

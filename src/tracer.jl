@@ -134,10 +134,8 @@ function shade(r::FastRay, n, t, first_diffuse_index) :: Float32
 
     r = FastRay(r.pos + r.dir * d,
                    zero(V3),
-                   r.in_medium,
-                   n,
-                   r.dest,
-                   r.λ)
+                   r.ignore_tri,
+            )
 
     if n >= first_diffuse_index
        # compute the position in the new triangle, set dir to zero
@@ -164,7 +162,6 @@ function ad_frame_matrix(
     height::Int,
     #hit_tris::AbstractArray{Tri},
     tris::AbstractArray{T},
-    skys,
     dλ,
     depth,
     ITERS,
@@ -180,7 +177,7 @@ function ad_frame_matrix(
     #out .= RGBf(0, 0, 0)
     λ_min = 400.0f0
     λ_max = 700.0f0
-    intensity = Float32(1 / ITERS * 1 / (λ_max - λ_min))
+    intensity = Float32(1 / ITERS)
 
     function init_ray(x, y, λ, dv)::AbstractRay
         _x, _y = x - width / 2, y - height / 2
@@ -224,8 +221,7 @@ function ad_frame_matrix(
     retina_factor=A(retina_factor)
     spectrum = A(spectrum)
 
-    synchronize()
-    @info "Stage 1: AD tracing depth = $depth"
+    #@info "Stage 1: AD tracing depth = $depth"
     begin
 
         dv .=
@@ -239,10 +235,10 @@ function ad_frame_matrix(
 
         for iter = 1:depth
             # compute hits
-            @info cutoff
+            #@info cutoff
             h_view = @view hit_idx[1:cutoff]
             r_view = @view rays[1:cutoff]
-            @info "hits..."
+            #@info "hits..."
             next_hit!(h_view, r_view, n_tris, false)
 
             # evolve rays optically
@@ -254,7 +250,7 @@ function ad_frame_matrix(
 
             # retire appropriate rays
             if sort_optimization
-                @info "retirement sort..."
+                #@info "retirement sort..."
                 sort!(r_view, by=ray->ray.status)
                 cutoff = count(ray->ray.status==RAY_STATUS_ACTIVE, r_view)
                 cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
@@ -264,16 +260,18 @@ function ad_frame_matrix(
         if sort_optimization
             # restore original order so we can use simple broadcasts to color RGB
             sort!(rays, by=r->r.dest)
+            synchronize()
         end
     end
 
-    @info "Stage 2: Expansion (optimization then evaluation)"
+    #@info "Stage 2: Expansion (optimization then evaluation)"
     # NB: we should also expand rays that have been dispersed AND go to infinity - the may have fringe intersections
     begin
-
-            expansion = expand.(rays, spectrum)
+            println("~~~~")
+            expansion = A{FastRay}(undef, (length(rays), 1, length(spectrum)))
+            expansion .= expand.(rays, spectrum)
             # TODO: dont move ones
-            hits = A(ones(Int32, size(expansion)))
+            hits = CUDA.ones(Int32, size(expansion))
             next_hit!(hits, expansion, n_tris, false)
             tri_view = @view tris[hits]
 
@@ -281,38 +279,27 @@ function ad_frame_matrix(
     #map!(evolve_ray, expansion, expansion, hits, tri_view)
 
     frame_n = 1
-    @info "Stage 3: Images"
+    #@info "Stage 3: Images"
     # output array
     RGB = A{Float32}(undef, length(rays), 3)
 
 
     begin
         RGB .= 0.0f0
-        for (i, sky) in enumerate(skys)
-            # WARNING deleted `r.in_medium ? 0.0f0 : `
-            function shade_inf(r, λ, rf)
-                if r.status == RAY_STATUS_INFINITY
-                    return sky(r.dir + r.dir′ * (λ - r.λ), λ, Float32(2 * pi / 20 * frame_i / frame_n)) * rf * intensity * dλ
-                else
-                    return 0.0f0
-                end
-            end
 
-            # * rf * intensity * dλ
-            α = shade.(expansion, hits, tri_view, first_diffuse)
-            broadcast = @~ (α .* spectrum .* retina_factor .* intensity .* dλ)
+        # WARNING deleted `r.in_medium ? 0.0f0 : `
 
-            RGB += sum(broadcast, dims=3)  |> a -> reshape(a, length(rays), 3)
-            map!(brightness -> clamp(brightness, 0, 1), RGB, RGB)
-        end
 
-        out = Dict()
-        for s in keys(skys)
+        # * rf * intensity * dλ
+        α = @~ shade.(expansion, hits, tri_view, first_diffuse)
+        broadcast = @~ (α .* retina_factor .* intensity .* dλ)
 
-            img = RGBf.(map(a -> reshape(Array(a), height, width), (RGB[:, 1], RGB[:, 2], RGB[:, 3]))...)
-            Makie.save("out/$title.png", img)
+        RGB += sum(broadcast, dims=3)  |> a -> reshape(a, length(rays), 3)
+        map!(brightness -> clamp(brightness, 0, 1), RGB, RGB)
 
-        end
+        img = RGBf.(map(a -> reshape(Array(a), width, height), (RGB[:, 1], RGB[:, 2], RGB[:, 3]))...)
+        Makie.save("out/$title.png", img)
+
     end
     return nothing
 end
