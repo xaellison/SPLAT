@@ -169,8 +169,8 @@ function ad_frame_matrix(
     random,
     A, # type: either Array or CuArray
     sort_optimization,
-    title,
-    first_diffuse,
+    first_diffuse;
+    RGB
 ) where T
     camera = camera_generator(1, 1)
 
@@ -281,7 +281,7 @@ function ad_frame_matrix(
     frame_n = 1
     #@info "Stage 3: Images"
     # output array
-    RGB = A{Float32}(undef, length(rays), 3)
+
 
 
     begin
@@ -294,11 +294,8 @@ function ad_frame_matrix(
         α = @~ shade.(expansion, hits, tri_view, first_diffuse)
         broadcast = @~ (α .* retina_factor .* intensity .* dλ)
 
-        RGB += sum(broadcast, dims=3)  |> a -> reshape(a, length(rays), 3)
+        RGB .+= sum(broadcast, dims=3)  |> a -> reshape(a, length(rays), 3)
         map!(brightness -> clamp(brightness, 0, 1), RGB, RGB)
-
-        img = RGBf.(map(a -> reshape(Array(a), height, width), (RGB[:, 1], RGB[:, 2], RGB[:, 3]))...)
-        #Makie.save("out/$title.png", img)
 
     end
     return nothing

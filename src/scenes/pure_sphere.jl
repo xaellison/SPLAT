@@ -29,8 +29,8 @@ function main()
     skys = [sky_stripes_down]
 
 
-
-		images = @time ad_frame_matrix(
+	RGB = CuArray{Float32}(undef, width*height, 3)
+		@time ad_frame_matrix(
             moving_camera,
 			height,
 			width,
@@ -43,9 +43,13 @@ function main()
             CUDA.rand,
             CuArray,
 			false,
-			"pure/may/$(lpad(frame_i, 3, "0"))",
-			3,
+
+			3;
+			RGB = RGB
         )
+		img = RGBf.(map(a -> reshape(Array(a), height, width), (RGB[:, 1], RGB[:, 2], RGB[:, 3]))...)
+		title="pure/may/$(lpad(frame_i, 3, "0"))"
+        Makie.save("out/$title.png", img)
 	end
     println("~fin")
 end
