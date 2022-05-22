@@ -32,8 +32,8 @@ function main()
 
 		images = @time ad_frame_matrix(
             moving_camera,
-            width,
-            height,
+			height,
+			width,
 			#hit_tris,
             [Sphere(zero(V3), 0.0f0), Sphere(V3(3, 0, 0), 1.0f0), Sphere(V3(-3, 0.4, 0.6), 1.0f0)],
             dλ,

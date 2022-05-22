@@ -158,8 +158,8 @@ end
 
 function ad_frame_matrix(
     camera_generator::Function,
-    width::Int,
     height::Int,
+    width::Int,
     #hit_tris::AbstractArray{Tri},
     tris::AbstractArray{T},
     dλ,
@@ -180,8 +180,8 @@ function ad_frame_matrix(
     intensity = Float32(1 / ITERS)
 
     function init_ray(x, y, λ, dv)::AbstractRay
-        _x, _y = x - width / 2, y - height / 2
-        scale = width * _COS_45 / camera.FOV_half_sin
+        _x, _y = x - height / 2, y - width / 2
+        scale = height * _COS_45 / camera.FOV_half_sin
         _x /= scale
         _y /= scale
 
@@ -190,26 +190,26 @@ function ad_frame_matrix(
             _x * camera.right +
             _y * camera.up +
             _z * camera.dir +
-            dv * 0.25f0 / max(width, height)
+            dv * 0.25f0 / max(height, width)
         dir = normalize(dir)
-        idx = (y - 1) * width + x
+        idx = (y - 1) * height + x
         polarization = normalize(cross(camera.up, dir))
         return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 1, idx, λ, RAY_STATUS_ACTIVE)
     end
 
     n_tris = collect(zip(map(Int32, collect(1:length(tris))), tris)) |> A |> m -> reshape(m, 1, length(m)) |> A
     tris = A(tris)
-    row_indices = A(1:width)
-    col_indices = reshape(A(1:height), 1, height)
-    rays = A{ADRay}(undef, height * width)
+    row_indices = A(1:height)
+    col_indices = reshape(A(1:width), 1, width)
+    rays = A{ADRay}(undef, width * height)
     hit_idx = A(zeros(Int32, length(rays)))
-    dv = A{V3}(undef, width) # make w*h
+    dv = A{V3}(undef, height) # make w*h
     s0 = A{Float32}(undef, length(rays), 3)
 
 
     # Datastruct init
-    hits = A{Int32}(undef, (height* width))
-    rndm = random(Float32, width * height)
+    hits = A{Int32}(undef, (width* height))
+    rndm = random(Float32, height * width)
 
     # use host to compute constants used in turning spectra into colors
     spectrum = collect(λ_min:dλ:λ_max) |> a -> reshape(a, 1, 1, length(a))
@@ -226,11 +226,11 @@ function ad_frame_matrix(
 
         dv .=
             V3.(
-                random(Float32, width),
-                random(Float32, width),
-                random(Float32, width),
+                random(Float32, height),
+                random(Float32, height),
+                random(Float32, height),
             )
-        rays .= reshape(init_ray.(row_indices, col_indices, 550.0, dv), width * height)
+        rays .= reshape(init_ray.(row_indices, col_indices, 550.0, dv), height * width)
         cutoff = length(rays)
 
         for iter = 1:depth
@@ -297,8 +297,8 @@ function ad_frame_matrix(
         RGB += sum(broadcast, dims=3)  |> a -> reshape(a, length(rays), 3)
         map!(brightness -> clamp(brightness, 0, 1), RGB, RGB)
 
-        img = RGBf.(map(a -> reshape(Array(a), width, height), (RGB[:, 1], RGB[:, 2], RGB[:, 3]))...)
-        Makie.save("out/$title.png", img)
+        img = RGBf.(map(a -> reshape(Array(a), height, width), (RGB[:, 1], RGB[:, 2], RGB[:, 3]))...)
+        #Makie.save("out/$title.png", img)
 
     end
     return nothing
