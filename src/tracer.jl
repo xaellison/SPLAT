@@ -161,7 +161,6 @@ function ad_frame_matrix(
     height::Int,
     width::Int,
     #hit_tris::AbstractArray{Tri},
-    tris::AbstractArray{T},
     dλ,
     depth,
     ITERS,
@@ -170,13 +169,28 @@ function ad_frame_matrix(
     A, # type: either Array or CuArray
     sort_optimization,
     first_diffuse;
-    RGB
+    RGB,
+    n_tris,
+    tris,
+    row_indices,
+    col_indices,
+    rays,
+    hit_idx,
+    dv,
+    s0,
+
+    # Datastruct init
+    hits,
+    rndm,
+
+    # use host to compute constants used in turning spectra into colors
+    spectrum,
+    retina_factor,
 ) where T
     camera = camera_generator(1, 1)
 
     #out .= RGBf(0, 0, 0)
-    λ_min = 400.0f0
-    λ_max = 700.0f0
+    
     intensity = Float32(1 / ITERS)
 
     function init_ray(x, y, λ, dv)::AbstractRay
@@ -197,23 +211,7 @@ function ad_frame_matrix(
         return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 1, idx, λ, RAY_STATUS_ACTIVE)
     end
 
-    n_tris = collect(zip(map(Int32, collect(1:length(tris))), tris)) |> A |> m -> reshape(m, 1, length(m)) |> A
-    tris = A(tris)
-    row_indices = A(1:height)
-    col_indices = reshape(A(1:width), 1, width)
-    rays = A{ADRay}(undef, width * height)
-    hit_idx = A(zeros(Int32, length(rays)))
-    dv = A{V3}(undef, height) # make w*h
-    s0 = A{Float32}(undef, length(rays), 3)
 
-
-    # Datastruct init
-    hits = A{Int32}(undef, (width* height))
-    rndm = random(Float32, height * width)
-
-    # use host to compute constants used in turning spectra into colors
-    spectrum = collect(λ_min:dλ:λ_max) |> a -> reshape(a, 1, 1, length(a))
-    retina_factor = Array{Float32}(undef, 1, 3, length(spectrum))
     map!(retina_red, begin @view retina_factor[1, 1, :] end, spectrum)
     map!(retina_green, begin @view retina_factor[1, 2, :] end, spectrum)
     map!(retina_blue, begin @view retina_factor[1, 3, :] end, spectrum)
