@@ -5,7 +5,7 @@ using ForwardDiff
 using Makie
 using ProgressMeter
 using Serialization
-function get_hit(n_s::Tuple{Int32, Sphere}, r::AbstractRay)
+function get_hit(n_s::Tuple{Int32,Sphere}, r::AbstractRay)
     # https://en.wikipedia.org/wiki/Line%E2%80%93sphere_intersection
     n, s = n_s
     if s.radius <= 0
@@ -18,7 +18,7 @@ function get_hit(n_s::Tuple{Int32, Sphere}, r::AbstractRay)
     return (d, n, s)
 end
 
-function get_hit(n_s::Tuple{Int32, Sphere}, r::ADRay)
+function get_hit(n_s::Tuple{Int32,Sphere}, r::ADRay)
     n, s = n_s
     if s.radius <= 0
         return ((Inf32, Inf32), one(Int32), s)
@@ -42,11 +42,19 @@ function get_hit(n_t::Tuple{Int32,T}, r::AbstractRay)::Tuple{Float32,Int32,T} wh
     end
 end
 
-function get_hit(n_t::Tuple{Int32,T}, r::ADRay)::Tuple{Tuple{Float32,Float32},Int32,T} where {T}
+function get_hit(
+    n_t::Tuple{Int32,T},
+    r::ADRay,
+)::Tuple{Tuple{Float32,Float32},Int32,T} where {T}
     n, t = n_t
     # for n = 1, the degenerate triangle, this will be NaN, which fails d0 > 0 below
     d0 = distance_to_plane(r.pos, r.dir, t[2], t[1])
-    d(λ) = distance_to_plane(r.pos + r.pos′ * (λ - r.λ), r.dir + r.dir′ * (λ - r.λ), t[2], t[1])
+    d(λ) = distance_to_plane(
+        r.pos + r.pos′ * (λ - r.λ),
+        r.dir + r.dir′ * (λ - r.λ),
+        t[2],
+        t[1],
+    )
     p = r.pos + r.dir * d0
     if in_triangle(p, t[2], t[3], t[4]) && d0 > 0 && r.ignore_tri != n
         return ((d0, ForwardDiff.derivative(d, r.λ)), n, t)
@@ -57,19 +65,34 @@ end
 
 ## Hit computers for AD  Rays
 #"""
-function next_hit!(dest :: AbstractArray{I}, rays, n_tris:: AbstractArray{Tuple{I, T}}, override=false) where {I, T}
-    for i in 1:length(dest)
+function next_hit!(
+    dest::AbstractArray{I},
+    rays,
+    n_tris::AbstractArray{Tuple{I,T}},
+    override = false,
+) where {I,T}
+    for i = 1:length(dest)
 
-        dest[i] = minimum(n_tri -> hit_argmin(n_tri, rays[i]), n_tris, init=(Inf32, one(I)))[2]
+        dest[i] =
+            minimum(n_tri -> hit_argmin(n_tri, rays[i]), n_tris, init = (Inf32, one(I)))[2]
 
     end
     return nothing
 end
 
-function next_hit!(dest :: AbstractArray{I}, rays :: AbstractArray{ADRay}, n_tris:: AbstractArray{Tuple{I, T}}, override=false) where {I, T}
-    for i in 1:length(dest)
+function next_hit!(
+    dest::AbstractArray{I},
+    rays::AbstractArray{ADRay},
+    n_tris::AbstractArray{Tuple{I,T}},
+    override = false,
+) where {I,T}
+    for i = 1:length(dest)
         if rays[i].status == RAY_STATUS_ACTIVE || override
-            dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i])[1:2], n_tris, init=((Inf32, Inf32), one(I)))[2]
+            dest[i] = minimum(
+                n_tri -> get_hit(n_tri, rays[i])[1:2],
+                n_tris,
+                init = ((Inf32, Inf32), one(I)),
+            )[2]
         else
             dest[i] = one(I)
         end
@@ -80,30 +103,47 @@ end
 ## Ray evolvers
 
 
-function p(r, d, d′, λ::N) where N
+function p(r, d, d′, λ::N) where {N}
     r.pos + # origin constant
     r.pos′ * (λ - r.λ) +  #origin linear
     (r.dir + # direction constant
-    r.dir′ * (λ - r.λ)) * # ... plus direction linear
+     r.dir′ * (λ - r.λ)) * # ... plus direction linear
     (d + d′ * (λ - r.λ)) # times constant + linear distance
 end
 
-function handle_optics(r, d, d′, n, N, n1 :: N1, n2::N2, rndm) where {N1, N2}
-    refracts = can_refract(r.dir, N(r.λ), n1(r.λ), n2(r.λ)) && rndm > reflectance(r.dir, N(r.λ), n1(r.λ), n2(r.λ))
+function handle_optics(r, d, d′, n, N, n1::N1, n2::N2, rndm) where {N1,N2}
+    refracts =
+        can_refract(r.dir, N(r.λ), n1(r.λ), n2(r.λ)) &&
+        rndm > reflectance(r.dir, N(r.λ), n1(r.λ), n2(r.λ))
 
     if refracts
-        return ADRay(p(r, d, d′, r.λ),
-                     ForwardDiff.derivative(λ->p(r, d, d′, λ), r.λ),
-                     refract(r.dir, N(r.λ), n1(r.λ), n2(r.λ)),
-                     ForwardDiff.derivative(λ -> refract(r.dir + r.dir′ * (λ - r.λ), N(r.λ), n1(λ), n2(λ)), r.λ),
-                     !r.in_medium, n, r.dest, r.λ, RAY_STATUS_ACTIVE)
+        return ADRay(
+            p(r, d, d′, r.λ),
+            ForwardDiff.derivative(λ -> p(r, d, d′, λ), r.λ),
+            refract(r.dir, N(r.λ), n1(r.λ), n2(r.λ)),
+            ForwardDiff.derivative(
+                λ -> refract(r.dir + r.dir′ * (λ - r.λ), N(r.λ), n1(λ), n2(λ)),
+                r.λ,
+            ),
+            !r.in_medium,
+            n,
+            r.dest,
+            r.λ,
+            RAY_STATUS_ACTIVE,
+        )
 
     else
-        return ADRay(p(r, d, d′, r.λ),
-                     ForwardDiff.derivative(λ->p(r, d, d′, λ), r.λ),
-                     reflect(r.dir, N(r.λ)),
-                     ForwardDiff.derivative(λ -> reflect(r.dir + r.dir′ * (λ - r.λ), N(λ)), r.λ),
-                     r.in_medium, n, r.dest, r.λ, RAY_STATUS_ACTIVE)
+        return ADRay(
+            p(r, d, d′, r.λ),
+            ForwardDiff.derivative(λ -> p(r, d, d′, λ), r.λ),
+            reflect(r.dir, N(r.λ)),
+            ForwardDiff.derivative(λ -> reflect(r.dir + r.dir′ * (λ - r.λ), N(λ)), r.λ),
+            r.in_medium,
+            n,
+            r.dest,
+            r.λ,
+            RAY_STATUS_ACTIVE,
+        )
     end
 end
 
@@ -128,27 +168,24 @@ function evolve_ray(r::ADRay, n, t, rndm, first_diffuse_index)::ADRay
     end
 end
 
-function shade(r::FastRay, n, t, first_diffuse_index) :: Float32
+function shade(r::FastRay, n, t, first_diffuse_index)::Float32
     # evolve to hit a diffuse surface
     d, n, t = get_hit((n, t), r)
 
-    r = FastRay(r.pos + r.dir * d,
-                   zero(V3),
-                   r.ignore_tri,
-            )
+    r = FastRay(r.pos + r.dir * d, zero(V3), r.ignore_tri)
 
     if n >= first_diffuse_index
-       # compute the position in the new triangle, set dir to zero
-       u, v = reverse_uv(r.pos, t)
-       s = 0.1f0
-       if xor(u % s > s / 2, v % s > s / 2)
-           return 1.0f0
-       else
-           return 0.0f0
-       end
+        # compute the position in the new triangle, set dir to zero
+        u, v = reverse_uv(r.pos, t)
+        s = 0.1f0
+        if xor(u % s > s / 2, v % s > s / 2)
+            return 1.0f0
+        else
+            return 0.0f0
+        end
     end
     if isinf(d)
-       return 0.0f0# retire(r, RAY_STATUS_INFINITY)
+        return 0.0f0# retire(r, RAY_STATUS_INFINITY)
     end
     return 0.0f0
 end
@@ -186,11 +223,11 @@ function ad_frame_matrix(
     # use host to compute constants used in turning spectra into colors
     spectrum,
     retina_factor,
-) where T
+) where {T}
     camera = camera_generator(1, 1)
 
     #out .= RGBf(0, 0, 0)
-    
+
     intensity = Float32(1 / ITERS)
 
     function init_ray(x, y, λ, dv)::AbstractRay
@@ -208,26 +245,37 @@ function ad_frame_matrix(
         dir = normalize(dir)
         idx = (y - 1) * height + x
         polarization = normalize(cross(camera.up, dir))
-        return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 1, idx, λ, RAY_STATUS_ACTIVE)
+        return ADRay(
+            camera.pos,
+            zero(V3),
+            dir,
+            zero(V3),
+            false,
+            1,
+            idx,
+            λ,
+            RAY_STATUS_ACTIVE,
+        )
     end
 
 
-    map!(retina_red, begin @view retina_factor[1, 1, :] end, spectrum)
-    map!(retina_green, begin @view retina_factor[1, 2, :] end, spectrum)
-    map!(retina_blue, begin @view retina_factor[1, 3, :] end, spectrum)
+    map!(retina_red, begin
+        @view retina_factor[1, 1, :]
+    end, spectrum)
+    map!(retina_green, begin
+        @view retina_factor[1, 2, :]
+    end, spectrum)
+    map!(retina_blue, begin
+        @view retina_factor[1, 3, :]
+    end, spectrum)
 
-    retina_factor=A(retina_factor)
+    retina_factor = A(retina_factor)
     spectrum = A(spectrum)
 
     #@info "Stage 1: AD tracing depth = $depth"
     begin
 
-        dv .=
-            V3.(
-                random(Float32, height),
-                random(Float32, height),
-                random(Float32, height),
-            )
+        dv .= V3.(random(Float32, height), random(Float32, height), random(Float32, height))
         rays .= reshape(init_ray.(row_indices, col_indices, 550.0, dv), height * width)
         cutoff = length(rays)
 
@@ -243,21 +291,22 @@ function ad_frame_matrix(
             rndm .= random(Float32, length(rays))
             tri_view = @view tris[hit_idx]
             # I need to pass a scalar arg - this closure seems necessary since map! freaks at scalar args
-            evolve_closure(rays, hit_idx, tri_view, rndm) = evolve_ray(rays, hit_idx, tri_view, rndm, first_diffuse)
+            evolve_closure(rays, hit_idx, tri_view, rndm) =
+                evolve_ray(rays, hit_idx, tri_view, rndm, first_diffuse)
             map!(evolve_closure, rays, rays, hit_idx, tri_view, rndm)
 
             # retire appropriate rays
             if sort_optimization
                 #@info "retirement sort..."
-                sort!(r_view, by=ray->ray.status)
-                cutoff = count(ray->ray.status==RAY_STATUS_ACTIVE, r_view)
+                sort!(r_view, by = ray -> ray.status)
+                cutoff = count(ray -> ray.status == RAY_STATUS_ACTIVE, r_view)
                 cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
             end
         end
 
         if sort_optimization
             # restore original order so we can use simple broadcasts to color RGB
-            sort!(rays, by=r->r.dest)
+            sort!(rays, by = r -> r.dest)
             synchronize()
         end
     end
@@ -265,13 +314,13 @@ function ad_frame_matrix(
     #@info "Stage 2: Expansion (optimization then evaluation)"
     # NB: we should also expand rays that have been dispersed AND go to infinity - the may have fringe intersections
     begin
-            println("~~~~")
-            expansion = A{FastRay}(undef, (length(rays), 1, length(spectrum)))
-            expansion .= expand.(rays, spectrum)
-            # TODO: dont move ones
-            hits = CUDA.ones(Int32, size(expansion))
-            next_hit!(hits, expansion, n_tris, false)
-            tri_view = @view tris[hits]
+        println("~~~~")
+        expansion = A{FastRay}(undef, (length(rays), 1, length(spectrum)))
+        expansion .= expand.(rays, spectrum)
+        # TODO: dont move ones
+        hits = CUDA.ones(Int32, size(expansion))
+        next_hit!(hits, expansion, n_tris, false)
+        tri_view = @view tris[hits]
 
     end
     #map!(evolve_ray, expansion, expansion, hits, tri_view)
@@ -292,7 +341,7 @@ function ad_frame_matrix(
         α = @~ shade.(expansion, hits, tri_view, first_diffuse)
         broadcast = @~ (α .* retina_factor .* intensity .* dλ)
 
-        RGB .+= sum(broadcast, dims=3)  |> a -> reshape(a, length(rays), 3)
+        RGB .+= sum(broadcast, dims = 3) |> a -> reshape(a, length(rays), 3)
         map!(brightness -> clamp(brightness, 0, 1), RGB, RGB)
 
     end
