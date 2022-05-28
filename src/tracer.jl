@@ -203,9 +203,9 @@ function ad_frame_matrix(
     ITERS,
     phi,
     random,
-    A, # type: either Array or CuArray
     sort_optimization,
     first_diffuse;
+    RGB3,
     RGB,
     n_tris,
     tris,
@@ -218,8 +218,9 @@ function ad_frame_matrix(
 
     # Datastruct init
     hits,
+    tmp,
     rndm,
-
+    expansion,
     # use host to compute constants used in turning spectra into colors
     spectrum,
     retina_factor,
@@ -259,18 +260,6 @@ function ad_frame_matrix(
     end
 
 
-    map!(retina_red, begin
-        @view retina_factor[1, 1, :]
-    end, spectrum)
-    map!(retina_green, begin
-        @view retina_factor[1, 2, :]
-    end, spectrum)
-    map!(retina_blue, begin
-        @view retina_factor[1, 3, :]
-    end, spectrum)
-
-    retina_factor = A(retina_factor)
-    spectrum = A(spectrum)
 
     #@info "Stage 1: AD tracing depth = $depth"
     begin
@@ -284,16 +273,17 @@ function ad_frame_matrix(
             #@info cutoff
             h_view = @view hit_idx[1:cutoff]
             r_view = @view rays[1:cutoff]
+            tmp_view = @view tmp[1:cutoff]
             #@info "hits..."
-            next_hit!(h_view, r_view, n_tris, false)
+            @range "next hit" CUDA.@sync next_hit!(h_view, tmp_view, r_view, n_tris, false)
 
             # evolve rays optically
-            rndm .= random(Float32, length(rays))
+            CUDA.rand!(rndm)
             tri_view = @view tris[hit_idx]
             # I need to pass a scalar arg - this closure seems necessary since map! freaks at scalar args
             evolve_closure(rays, hit_idx, tri_view, rndm) =
                 evolve_ray(rays, hit_idx, tri_view, rndm, first_diffuse)
-            map!(evolve_closure, rays, rays, hit_idx, tri_view, rndm)
+            @range "evolve" CUDA.@sync map!(evolve_closure, rays, rays, hit_idx, tri_view, rndm)
 
             # retire appropriate rays
             if sort_optimization
@@ -313,13 +303,12 @@ function ad_frame_matrix(
 
     #@info "Stage 2: Expansion (optimization then evaluation)"
     # NB: we should also expand rays that have been dispersed AND go to infinity - the may have fringe intersections
-    begin
-        println("~~~~")
-        expansion = A{FastRay}(undef, (length(rays), 1, length(spectrum)))
-        expansion .= expand.(rays, spectrum)
+     begin
+        #expansion .= @~ expand.(rays, spectrum)
+        @range "expand" CUDA.@sync expansion .= expand.(rays, spectrum)
         # TODO: dont move ones
-        hits = CUDA.ones(Int32, size(expansion))
-        next_hit!(hits, expansion, n_tris, false)
+        hits .= Int32(1) #CUDA.ones(Int32, size(expansion))
+        @range "exp next hit" CUDA.@sync next_hit!(hits, tmp, expansion, n_tris, false)
         tri_view = @view tris[hits]
 
     end
@@ -332,7 +321,7 @@ function ad_frame_matrix(
 
 
     begin
-        RGB .= 0.0f0
+        RGB3 .= 0.0f0
 
         # WARNING deleted `r.in_medium ? 0.0f0 : `
 
@@ -341,8 +330,9 @@ function ad_frame_matrix(
         α = @~ shade.(expansion, hits, tri_view, first_diffuse)
         broadcast = @~ (α .* retina_factor .* intensity .* dλ)
 
-        RGB .+= sum(broadcast, dims = 3) |> a -> reshape(a, length(rays), 3)
-        map!(brightness -> clamp(brightness, 0, 1), RGB, RGB)
+        @range "RGB3" CUDA.@sync RGB3 .+= sum(broadcast, dims = 3) |> a -> reshape(a, length(rays), 3)
+        map!(brightness -> clamp(brightness, 0, 1), RGB3, RGB3)
+        RGB .= RGBf.(RGB3[:, 1], RGB3[:, 2], RGB3[:, 3])
 
     end
     return nothing
