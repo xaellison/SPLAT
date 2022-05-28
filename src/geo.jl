@@ -19,6 +19,11 @@ const Tri = SVector{4,V3}
 const STri = SVector{7,V3}
 const FTri = SVector{10, V3}
 
+struct Sphere
+    origin :: V3
+    radius :: Float32
+end
+
 struct Cam
     pos::V3
     look_at::V3
@@ -42,8 +47,8 @@ struct ADRay <: AbstractRay
     status::UInt8
 end
 
-const RAY_STATUS_ACTIVE = UInt8(0)
-const RAY_STATUS_DIFFUSE = UInt8(1)
+const RAY_STATUS_ACTIVE = UInt8(1)
+const RAY_STATUS_DIFFUSE = UInt8(0)
 const RAY_STATUS_INFINITY = UInt8(2)
 
 function retire(ray::ADRay, status)
@@ -54,24 +59,19 @@ end
 struct FastRay <: AbstractRay
     pos::V3
     dir::V3
-    in_medium::Bool
     ignore_tri::Int
-    dest::Int
-    λ::Float32
 end
 
 Base.zero(::V3) = V3(0.0f0, 0.0f0, 0.0f0)
 
-Base.zero(::Type{FastRay}) = FastRay(zero(V3), zero(V3), false, 1, -1, 0.0f0)
+Base.zero(::Type{FastRay}) = FastRay(zero(V3), zero(V3), 1)
+Base.zero(::Type{ADRay}) = ADRay(zero(V3), zero(V3), zero(V3), zero(V3), false, 1, -1, 0.0f0, zero(UInt8))
 
 function expand(r :: ADRay, λ :: Float32) :: FastRay
     return FastRay(
         r.pos + r.pos′ * (λ - r.λ),
         r.dir + r.dir′ * (λ - r.λ),
-        r.in_medium,
         r.ignore_tri,
-        r.dest,
-        λ,
     )
 end
 
@@ -90,7 +90,9 @@ function get_camera(pos, lookat, true_up, fov)
     return Cam(pos, lookat, dir, up, right, sin(fov / 2))
 end
 
-
+function optical_normal(s::Sphere, p)
+    return normalize(p - s.origin)
+end
 
 function optical_normal(t::Tri, p)
     t[1]
@@ -116,6 +118,9 @@ function optical_normal(t::FTri, pos::V) :: V where V
     optical_normal(STri(t[1], t[2], t[3], t[4], t[5], t[6], t[7]), pos)
 end
 
+function reverse_uv(r, t)
+    reverse_uv(r.pos, t)
+end
 
 function reverse_uv(pos::V3, t::FTri) :: Pair{Float32, Float32}
     a, b, c = t[2], t[3], t[4]
@@ -131,6 +136,14 @@ function reverse_uv(pos::V3, t::FTri) :: Pair{Float32, Float32}
     lambda3 = clamp(lambda3, 0, 1)
     t_vec = t_a * lambda1 + t_b * lambda2 + t_c * lambda3
     return Pair(t_vec[1], t_vec[2])
+end
+
+function reverse_uv(pos::V3, s::Sphere) :: Pair{Float32, Float32}
+    x, y, z = normalize(pos - s.origin)
+    y, z, x= x, y, z
+    θ = atan(y, x)
+    ϕ = atan(sqrt(x^2 + y^2), z)
+    return Pair(θ / (2 * pi) + 0.5f0, ϕ / (2 * pi) + 0.5f0)
 end
 
 function process_face(face, triangle_dest)
@@ -305,6 +318,27 @@ function rotation_matrix(axis, θ)
     return RotMatrix{3,Float32}(M)
 end
 
+function distance_to_sphere(r_pos, r_dir, s :: Sphere)
+    # schwartz inequality: radical can't be positive if radius = 0
+    radical = dot(r_dir, r_pos - s.origin) ^ 2 - (norm(r_pos - s.origin) ^ 2 - s.radius ^ 2)
+    # if it exactly hits at 1 point, discard this infinitesimal edge case
+    if radical <= 0
+        return Inf32
+    end
+    # empirically, a scalar of 1f-7 becomes problematic
+    ϵ = s.radius * 1.0f-6
+    d1 = dot(s.origin - r_pos, r_dir) - sqrt(radical)
+    if d1 > ϵ
+        return d1
+    end
+
+    d2 = dot(s.origin - r_pos, r_dir) + sqrt(radical)
+    if d2 > ϵ
+        return d2
+    end
+    return Inf32
+end
+
 @inline function distance_to_plane(
     origin,
     dir,
@@ -435,12 +469,13 @@ function can_refract(v, normal, n1, n2)::Bool
         n = -n
     end
     c1 = dot(normalize(v), n)
-    if c1^2 > 1.0f0
+    ϵ = 1.0f-9
+    if c1^2 > 1 - ϵ
         return false
     end
     s1 = sqrt(1.0f0 - c1 * c1)
     s2 = (n1 / n2) * s1
-    return abs(s2) < 0.99f0
+    return abs(s2) < 1 - ϵ
 end
 
 function can_refract_λ(v, normal, n1, n2, λ::N) where N
