@@ -17,11 +17,11 @@ function hit_argmin(n_t, r::FastRay) :: Tuple{Float32, Int32}
     return get_hit(n_t, r)[1:2]
 end
 
-function next_hit!(dest :: AnyCuArray, tmp :: AnyCuArray, rays:: AnyCuArray, n_tris:: AnyCuArray, override)
-
-  CUDA.@time CUDA.@sync @tullio (min) tmp[i] := hit_argmin(n_tris[j], rays[i])
-  d_view = @view dest[:]
-  d_view = reshape(d_view, length(d_view))
-  map!(x->x[2], d_view, tmp)
-  return
+function next_hit!(dest :: AnyCuArray, rays:: AnyCuArray, n_tris:: AnyCuArray, override)
+    # TODO: restore tmp as function arg?
+    CUDA.@time CUDA.@sync @tullio (min) tmp[i] := hit_argmin(n_tris[j], rays[i])
+    d_view = @view dest[:]
+    d_view = reshape(d_view, length(d_view))
+    map!(x->x[2], d_view, tmp)
+    return
 end

@@ -1,12 +1,11 @@
 # RUN FROM /
-using Revise, CUDA, LazyArrays#, GLMakie
-import CUDA.NVTX.@range
+using Revise, LazyArrays, Parameters
+
 include("../geo.jl")
 include("../skys.jl")
 include("../tracer.jl")
-include("../cuda.jl")
-function main()
 
+function scene_parameters()
     width = 896
     height = 896
     xmin = 1
@@ -14,6 +13,12 @@ function main()
     ymin = 1
     ymax = width
 
+    dλ = 25.0f0
+    λ_min = 400.0f0
+    λ_max = 700.0f0
+
+    depth = 2
+    ITERS = 1
 
     x = collect(xmin:xmax)#LinRange(-2, 1, 200)
     y = collect(ymin:ymax)#LinRange(-1.1, 1.1, 200)
@@ -23,18 +28,16 @@ function main()
     img = init.(x, y')
     #fig, ax, hm = image(x, y, img)
     #display(fig)
-    dλ = 25.0f0
-    λ_min = 400.0f0
-    λ_max = 700.0f0
-    RGB3 = CuArray{Float32}(undef, width * height, 3)
-    RGB = CuArray{RGBf}(undef, width * height)
 
-    row_indices = CuArray(1:height)
-    col_indices = reshape(CuArray(1:width), 1, width)
-    rays = CuArray{ADRay}(undef, width * height)
-    hit_idx = CuArray(zeros(Int32, length(rays)))
-    dv = CuArray{V3}(undef, height) # make w*h
-    s0 = CuArray{Float32}(undef, length(rays), 3)
+    RGB3 = Array{Float32}(undef, width * height, 3)
+    RGB = Array{RGBf}(undef, width * height)
+
+    row_indices = Array(1:height)
+    col_indices = reshape(Array(1:width), 1, width)
+    rays = Array{ADRay}(undef, width * height)
+    hit_idx = Array(zeros(Int32, length(rays)))
+    dv = Array{V3}(undef, height) # make w*h
+    s0 = Array{Float32}(undef, length(rays), 3)
 
 
     # use host to compute constants used in turning spectra into colors
@@ -50,84 +53,76 @@ function main()
         @view retina_factor[1, 3, :]
     end, spectrum)
 
-    retina_factor = CuArray(retina_factor)
-    spectrum = CuArray(spectrum)
+    retina_factor = Array(retina_factor)
+    spectrum = Array(spectrum)
 
     # Datastruct init
-    expansion = CuArray{FastRay}(undef, (length(rays), 1, length(spectrum)))
-    hits = CuArray{Int32}(undef, size(expansion))
-    tmp = CuArray{Tuple{Float32, Int32}}(undef, size(expansion))
-    rndm = CUDA.rand(Float32, height * width)
+    expansion = Array{FastRay}(undef, (length(rays), 1, length(spectrum)))
+    hits = Array{Int32}(undef, size(expansion))
+    tmp = Array{Tuple{Float32, Int32}}(undef, size(expansion))
+    rndm = rand(Float32, height * width)
+
     θ = 0.0f0
-    host_RGB = nothing
-    @time for ffff in 1:12
-        begin
-        θ += 2 * π / 360
-        function moving_camera(frame_i, frame_n)
-            camera_pos = V3((7, 0, 0)) #+ centroid
-            look_at = zero(V3)
-            up = V3((0.0, 0.0, -1.0))
-            FOV = 45.0 * pi / 180.0
 
-            return get_camera(camera_pos, look_at, up, FOV)
-        end
+    θ += 2 * π / 360
+    function my_moving_camera(frame_i, frame_n)
+        camera_pos = V3((7, 0, 0)) #+ centroid
+        look_at = zero(V3)
+        up = V3((0.0, 0.0, -1.0))
+        FOV = 45.0 * pi / 180.0
 
-        tris = [
-            Sphere(zero(V3), 0.0f0),
-            Sphere(V3(3, 0, 0), 1.0f0),
-            Sphere(V3(-3, cos(θ), sin(θ)), 1.0f0),
-        ]
-        n_tris = collect(zip(map(Int32, collect(1:length(tris))), tris)) |>
-            m -> reshape(m, 1, length(m))
-        tris = CuArray(tris)
-        n_tris = CuArray(n_tris)
-        depth = 2
-        ITERS = 1
-
-        skys = [sky_stripes_down]
-        ad_frame_matrix(
-            moving_camera,
-            height,
-            width,
-            dλ,
-            depth,
-            ITERS,
-            0,
-            CUDA.rand,
-            false,
-            3;
-            RGB3 = RGB3,
-            RGB=RGB,
-            n_tris = n_tris,
-            tris = tris,
-            row_indices = row_indices,
-            col_indices = col_indices,
-            rays = rays,
-            hit_idx = hit_idx,
-            dv = dv,
-            s0 = s0,
-
-            # Datastruct init
-            expansion = expansion,
-            hits = hits,
-            rndm = rndm,
-            tmp=tmp,
-            # use host to compute constants used in turning spectra into colors
-            spectrum = spectrum,
-            retina_factor = retina_factor,
-        )
-        if isnothing(host_RGB)
-            host_RGB = Array(RGB)
-        else
-            copyto!(host_RGB, RGB)
-        end
-        #hm[3] = reshape(host_RGB, (height,width))
+        return get_camera(camera_pos, look_at, up, FOV)
     end
-    #    yield()
-        #title = "pure/may/$(lpad(frame_i, 3, "0"))"
-        #Makie.save("out/$title.png", img)
-    end
-    println("~fin")
+
+    tris = [
+        Sphere(zero(V3), 0.0f0),
+        Sphere(V3(3, 0, 0), 1.0f0),
+        Sphere(V3(-3, cos(θ), sin(θ)), 1.0f0),
+    ]
+    n_tris = collect(zip(map(Int32, collect(1:length(tris))), tris)) |>
+        m -> reshape(m, 1, length(m))
+
+    first_diffuse = 3
+    sort_optimization = true
+    camera_generator = my_moving_camera
+    scalar_kwargs = Dict{Symbol, Any}()
+    array_kwargs = Dict{Symbol, Any}()
+    @pack! scalar_kwargs =  width,
+                            height,
+                            dλ,
+                            depth,
+                            ITERS,
+                            first_diffuse,
+                            sort_optimization,
+                            camera_generator
+
+    @pack! array_kwargs = RGB3,
+                          RGB,
+                          n_tris,
+                          tris,
+                          row_indices,
+                          col_indices,
+                          rays,
+                          hit_idx,
+                          dv,
+                          s0,
+                          expansion,
+                          hits,
+                          rndm,
+                          tmp,
+                          spectrum,
+                          retina_factor
+
+    return scalar_kwargs, array_kwargs
 end
 
-@time main()
+function main()
+    skw, akw = scene_parameters()
+    ad_frame_matrix(;skw..., akw...)
+    @unpack RGB = akw
+    @unpack height, width = skw
+    return reshape(RGB, (height,width))
+end
+
+RGB= main()
+image(RGB)

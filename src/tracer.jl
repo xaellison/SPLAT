@@ -5,6 +5,9 @@ using ForwardDiff
 using Makie
 using ProgressMeter
 using Serialization
+
+import Random.rand!
+
 function get_hit(n_s::Tuple{Int32,Sphere}, r::AbstractRay)
     # https://en.wikipedia.org/wiki/Line%E2%80%93sphere_intersection
     n, s = n_s
@@ -65,20 +68,6 @@ end
 
 ## Hit computers for AD  Rays
 #"""
-function next_hit!(
-    dest::AbstractArray{I},
-    rays,
-    n_tris::AbstractArray{Tuple{I,T}},
-    override = false,
-) where {I,T}
-    for i = 1:length(dest)
-
-        dest[i] =
-            minimum(n_tri -> hit_argmin(n_tri, rays[i]), n_tris, init = (Inf32, one(I)))[2]
-
-    end
-    return nothing
-end
 
 function next_hit!(
     dest::AbstractArray{I},
@@ -96,6 +85,20 @@ function next_hit!(
         else
             dest[i] = one(I)
         end
+    end
+    return nothing
+end
+
+function next_hit!(
+    dest::AbstractArray{I},
+    rays::AbstractArray{FastRay},
+    n_tris::AbstractArray{Tuple{I,T}},
+) where {I,T}
+    for i = 1:length(dest)
+        dest[i] = minimum(
+            n_tri -> get_hit(n_tri, rays[i])[1:2],
+            n_tris,
+            init = (Inf32, one(I)))[2]
     end
     return nothing
 end
@@ -169,6 +172,7 @@ function evolve_ray(r::ADRay, n, t, rndm, first_diffuse_index)::ADRay
 end
 
 function shade(r::FastRay, n, t, first_diffuse_index)::Float32
+    # NB disregards in_medium
     # evolve to hit a diffuse surface
     d, n, t = get_hit((n, t), r)
 
@@ -194,17 +198,14 @@ end
 ## Wrap it all up
 
 function ad_frame_matrix(
-    camera_generator::Function,
+    ;camera_generator::Function,
     height::Int,
     width::Int,
-    #hit_tris::AbstractArray{Tri},
     dλ,
     depth,
     ITERS,
-    phi,
-    random,
     sort_optimization,
-    first_diffuse;
+    first_diffuse,
     RGB3,
     RGB,
     n_tris,
@@ -215,20 +216,14 @@ function ad_frame_matrix(
     hit_idx,
     dv,
     s0,
-
-    # Datastruct init
     hits,
     tmp,
     rndm,
     expansion,
-    # use host to compute constants used in turning spectra into colors
     spectrum,
     retina_factor,
 ) where {T}
     camera = camera_generator(1, 1)
-
-    #out .= RGBf(0, 0, 0)
-
     intensity = Float32(1 / ITERS)
 
     function init_ray(x, y, λ, dv)::AbstractRay
@@ -245,7 +240,6 @@ function ad_frame_matrix(
             dv * 0.25f0 / max(height, width)
         dir = normalize(dir)
         idx = (y - 1) * height + x
-        polarization = normalize(cross(camera.up, dir))
         return ADRay(
             camera.pos,
             zero(V3),
@@ -263,8 +257,8 @@ function ad_frame_matrix(
 
     #@info "Stage 1: AD tracing depth = $depth"
     begin
-
-        dv .= V3.(random(Float32, height), random(Float32, height), random(Float32, height))
+        # FIXME
+        dv .= V3.(rand(Float32, height), rand(Float32, height), rand(Float32, height))
         rays .= reshape(init_ray.(row_indices, col_indices, 550.0, dv), height * width)
         cutoff = length(rays)
 
@@ -273,17 +267,16 @@ function ad_frame_matrix(
             #@info cutoff
             h_view = @view hit_idx[1:cutoff]
             r_view = @view rays[1:cutoff]
-            tmp_view = @view tmp[1:cutoff]
             #@info "hits..."
-            @range "next hit" CUDA.@sync next_hit!(h_view, tmp_view, r_view, n_tris, false)
+            next_hit!(h_view, r_view, n_tris, false)
 
             # evolve rays optically
-            CUDA.rand!(rndm)
+            rand!(rndm)
             tri_view = @view tris[hit_idx]
             # I need to pass a scalar arg - this closure seems necessary since map! freaks at scalar args
             evolve_closure(rays, hit_idx, tri_view, rndm) =
                 evolve_ray(rays, hit_idx, tri_view, rndm, first_diffuse)
-            @range "evolve" CUDA.@sync map!(evolve_closure, rays, rays, hit_idx, tri_view, rndm)
+            map!(evolve_closure, rays, rays, hit_idx, tri_view, rndm)
 
             # retire appropriate rays
             if sort_optimization
@@ -296,41 +289,32 @@ function ad_frame_matrix(
 
         if sort_optimization
             # restore original order so we can use simple broadcasts to color RGB
+            # TODO: make abstraction so synchronize() works on GPU (if quicksort)
             sort!(rays, by = r -> r.dest)
-            synchronize()
         end
     end
 
     #@info "Stage 2: Expansion (optimization then evaluation)"
     # NB: we should also expand rays that have been dispersed AND go to infinity - the may have fringe intersections
      begin
-        #expansion .= @~ expand.(rays, spectrum)
-        @range "expand" CUDA.@sync expansion .= expand.(rays, spectrum)
-        # TODO: dont move ones
-        hits .= Int32(1) #CUDA.ones(Int32, size(expansion))
-        @range "exp next hit" CUDA.@sync next_hit!(hits, tmp, expansion, n_tris, false)
+        expansion .= expand.(rays, spectrum)
+        hits .= Int32(1)
+        next_hit!(hits, expansion, n_tris)
         tri_view = @view tris[hits]
-
     end
     #map!(evolve_ray, expansion, expansion, hits, tri_view)
 
     frame_n = 1
     #@info "Stage 3: Images"
-    # output array
-
 
 
     begin
         RGB3 .= 0.0f0
-
-        # WARNING deleted `r.in_medium ? 0.0f0 : `
-
-
-        # * rf * intensity * dλ
         α = @~ shade.(expansion, hits, tri_view, first_diffuse)
-        broadcast = @~ (α .* retina_factor .* intensity .* dλ)
+        # TODO: restore @~ for gpu
+        broadcast =  (α .* retina_factor .* intensity .* dλ)
 
-        @range "RGB3" CUDA.@sync RGB3 .+= sum(broadcast, dims = 3) |> a -> reshape(a, length(rays), 3)
+        RGB3 .+= sum(broadcast, dims = 3) |> a -> reshape(a, length(rays), 3)
         map!(brightness -> clamp(brightness, 0, 1), RGB3, RGB3)
         RGB .= RGBf.(RGB3[:, 1], RGB3[:, 2], RGB3[:, 3])
 
