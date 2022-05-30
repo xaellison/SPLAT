@@ -175,7 +175,6 @@ function shade(r::FastRay, n, t, first_diffuse_index)::Float32
     # NB disregards in_medium
     # evolve to hit a diffuse surface
     d, n, t = get_hit((n, t), r)
-
     r = FastRay(r.pos + r.dir * d, zero(V3), r.ignore_tri)
 
     if n >= first_diffuse_index
@@ -254,7 +253,6 @@ function ad_frame_matrix(
     end
 
 
-
     #@info "Stage 1: AD tracing depth = $depth"
     begin
         # FIXME
@@ -267,6 +265,7 @@ function ad_frame_matrix(
             #@info cutoff
             h_view = @view hit_idx[1:cutoff]
             r_view = @view rays[1:cutoff]
+            @info "$(length(r_view)) / $(length(rays)) = $(length(r_view) / length(rays))"
             #@info "hits..."
             next_hit!(h_view, r_view, n_tris, false)
 
@@ -276,7 +275,7 @@ function ad_frame_matrix(
             # I need to pass a scalar arg - this closure seems necessary since map! freaks at scalar args
             evolve_closure(rays, hit_idx, tri_view, rndm) =
                 evolve_ray(rays, hit_idx, tri_view, rndm, first_diffuse)
-            map!(evolve_closure, rays, rays, hit_idx, tri_view, rndm)
+            map!(evolve_closure, rays, r_view, h_view, tri_view, rndm)
 
             # retire appropriate rays
             if sort_optimization

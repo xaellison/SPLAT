@@ -6,8 +6,8 @@ include("../skys.jl")
 include("../tracer.jl")
 
 function scene_parameters()
-    width = 2048
-    height = 2048
+    width = 256
+    height = 256
     xmin = 1
     xmax = height
     ymin = 1
@@ -74,15 +74,23 @@ function scene_parameters()
         return get_camera(camera_pos, look_at, up, FOV)
     end
 
-    tris = [
-        Sphere(zero(V3), 0.0f0),
-        Sphere(V3(3, 0, 0), 1.0f0),
-        Sphere(V3(-3, cos(θ), sin(θ)), 1.0f0),
-    ]
+    obj_path = "objs/sphere.obj"
+	glass_sphere = mesh_to_FTri(load(obj_path))
+	map!(t->translate(t, V3(3.0, 0, 0.0)), glass_sphere, glass_sphere)
+	V = V3(0, cos(0), sin(0))
+	diffuse_sphere = mesh_to_FTri(load(obj_path))
+	map!(t->translate(t, V3(-3.0, 0, 0.0) + V), diffuse_sphere, diffuse_sphere)
+
+	meshes = [[zero(STri)], glass_sphere, diffuse_sphere]
+
+	tris = foldl(vcat, meshes)
+
     n_tris = collect(zip(map(Int32, collect(1:length(tris))), tris)) |>
         m -> reshape(m, 1, length(m))
 
-    first_diffuse = 3
+	tris_per_sphere = length(glass_sphere)
+
+    first_diffuse =  1 + 1 + tris_per_sphere
     sort_optimization = false
     camera_generator = my_moving_camera
     scalar_kwargs = Dict{Symbol, Any}()

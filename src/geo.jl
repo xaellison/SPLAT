@@ -67,6 +67,11 @@ Base.zero(::V3) = V3(0.0f0, 0.0f0, 0.0f0)
 Base.zero(::Type{FastRay}) = FastRay(zero(V3), zero(V3), 1)
 Base.zero(::Type{ADRay}) = ADRay(zero(V3), zero(V3), zero(V3), zero(V3), false, 1, -1, 0.0f0, zero(UInt8))
 
+translate(t :: Tri, v) = Tri(t[1], t[2] + v, t[3] + v, t[4] + v)
+translate(t :: STri, v) = STri(t[1], t[2] + v, t[3] + v, t[4] + v, t[5], t[6], t[7])
+translate(t :: FTri, v) = FTri(t[1], t[2] + v, t[3] + v, t[4] + v, t[5], t[6], t[7], t[8], t[9], t[10])
+
+
 function expand(r :: ADRay, λ :: Float32) :: FastRay
     return FastRay(
         r.pos + r.pos′ * (λ - r.λ),
