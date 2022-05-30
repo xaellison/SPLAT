@@ -5,6 +5,7 @@ using ForwardDiff
 using Makie
 using ProgressMeter
 using Serialization
+using Tullio
 
 import Random.rand!
 
@@ -69,39 +70,31 @@ end
 ## Hit computers for AD  Rays
 #"""
 
-function next_hit!(
-    dest::AbstractArray{I},
-    rays::AbstractArray{ADRay},
-    n_tris::AbstractArray{Tuple{I,T}},
-    override = false,
-) where {I,T}
-    for i = 1:length(dest)
-        if rays[i].status == RAY_STATUS_ACTIVE || override
-            dest[i] = minimum(
-                n_tri -> get_hit(n_tri, rays[i])[1:2],
-                n_tris,
-                init = ((Inf32, Inf32), one(I)),
-            )[2]
-        else
-            dest[i] = one(I)
-        end
-    end
-    return nothing
+function typemax(::Type{Tuple{Tuple{Float32,Float32},Int32}})
+    return ((Inf32, Inf32), one(Int32))
 end
 
-function next_hit!(
-    dest::AbstractArray{I},
-    rays::AbstractArray{FastRay},
-    n_tris::AbstractArray{Tuple{I,T}},
-) where {I,T}
-    for i = 1:length(dest)
-        dest[i] = minimum(
-            n_tri -> get_hit(n_tri, rays[i])[1:2],
-            n_tris,
-            init = (Inf32, one(I)))[2]
-    end
-    return nothing
+function typemax(::Type{Tuple{Float32,Int32}})
+    return (Inf32, one(Int32))
 end
+
+function hit_argmin(n_t, r::ADRay) :: Tuple{Tuple{Float32, Float32}, Int32}
+    return get_hit(n_t, r)[1:2]
+end
+
+function hit_argmin(n_t, r::FastRay) :: Tuple{Float32, Int32}
+    return get_hit(n_t, r)[1:2]
+end
+
+function next_hit!(dest, rays, n_tris)
+    # TODO: restore tmp as function arg?
+    @tullio (min) tmp[i] := hit_argmin(n_tris[j], rays[i])
+    d_view = @view dest[:]
+    d_view = reshape(d_view, length(d_view))
+    map!(x->x[2], d_view, tmp)
+    return
+end
+
 #"""
 ## Ray evolvers
 
@@ -267,7 +260,7 @@ function ad_frame_matrix(
             r_view = @view rays[1:cutoff]
             @info "$(length(r_view)) / $(length(rays)) = $(length(r_view) / length(rays))"
             #@info "hits..."
-            next_hit!(h_view, r_view, n_tris, false)
+            next_hit!(h_view, r_view, n_tris)
 
             # evolve rays optically
             rand!(rndm)

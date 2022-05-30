@@ -1,6 +1,6 @@
 # RUN FROM /
 using Revise, LazyArrays, Parameters
-
+# NOTE: for GPU need KernelAbstractions, CUDAKernels for efficient tullio
 include("../geo.jl")
 include("../skys.jl")
 include("../tracer.jl")
