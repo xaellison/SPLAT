@@ -3,7 +3,6 @@ include("rgb_spectrum.jl")
 
 using ForwardDiff
 using Makie
-using ProgressMeter
 using Serialization
 using Tullio
 
@@ -187,6 +186,26 @@ function shade(r::FastRay, n, t, first_diffuse_index)::Float32
 end
 
 
+function shade_tex(r::FastRay, n, t, first_diffuse_index, tex :: AbstractArray{Float32})::Float32
+    # NB disregards in_medium
+    # evolve to hit a diffuse surface
+    d, n, t = get_hit((n, t), r)
+    r = FastRay(r.pos + r.dir * d, zero(V3), r.ignore_tri)
+
+    if n >= first_diffuse_index
+        # compute the position in the new triangle, set dir to zero
+        u, v = reverse_uv(r.pos, t)
+        # it's theoretically possible u, v could come back as zero
+        i = max(1, Int(ceil(u * (size(tex)[1]))))
+        j = max(1, Int(ceil(v * (size(tex)[2]))))
+        return tex[i, j]
+    end
+    if isinf(d)
+        return 0.0f0# retire(r, RAY_STATUS_INFINITY)
+    end
+    return 0.0f0
+end
+
 ## Wrap it all up
 
 function ad_frame_matrix(
@@ -214,6 +233,7 @@ function ad_frame_matrix(
     expansion,
     spectrum,
     retina_factor,
+    tex,
 ) where {T}
     camera = camera_generator(1, 1)
     intensity = Float32(1 / ITERS)
@@ -249,7 +269,7 @@ function ad_frame_matrix(
     #@info "Stage 1: AD tracing depth = $depth"
     begin
         # FIXME
-        dv .= V3.(rand(Float32, height), rand(Float32, height), rand(Float32, height))
+        dv .= V3.(CUDA.rand(Float32, height, width), CUDA.rand(Float32, height, width), CUDA.rand(Float32, height, width))
         rays .= reshape(init_ray.(row_indices, col_indices, 550.0, dv), height * width)
         cutoff = length(rays)
 
@@ -258,7 +278,7 @@ function ad_frame_matrix(
             #@info cutoff
             h_view = @view hit_idx[1:cutoff]
             r_view = @view rays[1:cutoff]
-            @info "$(length(r_view)) / $(length(rays)) = $(length(r_view) / length(rays))"
+            #@info "$(length(r_view)) / $(length(rays)) = $(length(r_view) / length(rays))"
             #@info "hits..."
             next_hit!(h_view, r_view, n_tris)
 
@@ -288,28 +308,26 @@ function ad_frame_matrix(
 
     #@info "Stage 2: Expansion (optimization then evaluation)"
     # NB: we should also expand rays that have been dispersed AND go to infinity - the may have fringe intersections
-     begin
-        expansion .= expand.(rays, spectrum)
-        hits .= Int32(1)
-        next_hit!(hits, expansion, n_tris)
-        tri_view = @view tris[hits]
+    RGB3 .= 0.0f0
+
+    for (n, λ) in enumerate(spectrum)
+         begin
+            expansion .= expand.(rays, λ)
+            hits .= Int32(1)
+            next_hit!(hits, expansion, n_tris)
+            tri_view = @view tris[hits]
+        end
+
+        #@info "Stage 3: Images"
+
+        begin
+            s(args...) = shade_tex(args..., tex)
+            α = s.(expansion, hits, tri_view, first_diffuse)
+            broadcast = (α .* retina_factor[:, :, n] .* intensity .* dλ)
+            RGB3 .+= sum(broadcast, dims = 3) |> a -> reshape(a, length(rays), 3)
+        end
     end
-    #map!(evolve_ray, expansion, expansion, hits, tri_view)
-
-    frame_n = 1
-    #@info "Stage 3: Images"
-
-
-    begin
-        RGB3 .= 0.0f0
-        α = @~ shade.(expansion, hits, tri_view, first_diffuse)
-        # TODO: restore @~ for gpu
-        broadcast =  (α .* retina_factor .* intensity .* dλ)
-
-        RGB3 .+= sum(broadcast, dims = 3) |> a -> reshape(a, length(rays), 3)
-        map!(brightness -> clamp(brightness, 0, 1), RGB3, RGB3)
-        RGB .= RGBf.(RGB3[:, 1], RGB3[:, 2], RGB3[:, 3])
-
-    end
+    map!(brightness -> clamp(brightness, 0, 1), RGB3, RGB3)
+    RGB .= RGBf.(RGB3[:, 1], RGB3[:, 2], RGB3[:, 3])
     return nothing
 end

@@ -1,6 +1,7 @@
 # RUN FROM /
 using Revise, LazyArrays, Parameters
 # NOTE: for GPU need KernelAbstractions, CUDAKernels for efficient tullio
+using CUDA, KernelAbstractions, CUDAKernels
 include("../geo.jl")
 include("../skys.jl")
 include("../tracer.jl")
@@ -36,7 +37,7 @@ function scene_parameters()
     col_indices = reshape(Array(1:width), 1, width)
     rays = Array{ADRay}(undef, width * height)
     hit_idx = Array(zeros(Int32, length(rays)))
-    dv = Array{V3}(undef, height) # make w*h
+    dv = Array{V3}(undef, height, width) # make w*h
     s0 = Array{Float32}(undef, length(rays), 3)
 
 
@@ -57,7 +58,7 @@ function scene_parameters()
     spectrum = Array(spectrum)
 
     # Datastruct init
-    expansion = Array{FastRay}(undef, (length(rays), 1, length(spectrum)))
+    expansion = Array{FastRay}(undef, length(rays))
     hits = Array{Int32}(undef, size(expansion))
     tmp = Array{Tuple{Float32, Int32}}(undef, size(expansion))
     rndm = rand(Float32, height * width)
@@ -81,9 +82,9 @@ function scene_parameters()
 	diffuse_sphere = mesh_to_FTri(load(obj_path))
 	map!(t->translate(t, V3(-3.0, 0, 0.0) + V), diffuse_sphere, diffuse_sphere)
 
-	meshes = [[zero(STri)], glass_sphere, diffuse_sphere]
+	meshes = [[zero(FTri)], glass_sphere, diffuse_sphere]
 
-	tris = foldl(vcat, meshes)
+	tris = CuArray(foldl(vcat, meshes))
 
     n_tris = collect(zip(map(Int32, collect(1:length(tris))), tris)) |>
         m -> reshape(m, 1, length(m))
@@ -91,6 +92,9 @@ function scene_parameters()
 	tris_per_sphere = length(glass_sphere)
 
     first_diffuse =  1 + 1 + tris_per_sphere
+
+	tex = rand(Float32, 512, 512)
+
     sort_optimization = false
     camera_generator = my_moving_camera
     scalar_kwargs = Dict{Symbol, Any}()
@@ -119,17 +123,19 @@ function scene_parameters()
                           rndm,
                           tmp,
                           spectrum,
-                          retina_factor
+                          retina_factor,
+						  tex
 
     return scalar_kwargs, array_kwargs
 end
 
 function main()
     skw, akw = scene_parameters()
+	akw = Dict(kv[1]=>CuArray(kv[2]) for kv in akw)
     ad_frame_matrix(;skw..., akw...)
     @unpack RGB = akw
     @unpack height, width = skw
-    return reshape(RGB, (height,width))
+    return reshape(Array(RGB), (height,width))
 end
 
 @time RGB= main()

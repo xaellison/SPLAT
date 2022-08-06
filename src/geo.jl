@@ -144,11 +144,13 @@ function reverse_uv(pos::V3, t::FTri) :: Pair{Float32, Float32}
 end
 
 function reverse_uv(pos::V3, s::Sphere) :: Pair{Float32, Float32}
+    # lazy test like: min/max [1]/[2]
+    # maximum(reverse_uv(rand(V3), Sphere(V3(0.5,0.5,0.5), 1))[1] for i in 1:10000)
     x, y, z = normalize(pos - s.origin)
+    ϕ = atan(sqrt(x^2 + y^2), z)
     y, z, x= x, y, z
     θ = atan(y, x)
-    ϕ = atan(sqrt(x^2 + y^2), z)
-    return Pair(θ / (2 * pi) + 0.5f0, ϕ / (2 * pi) + 0.5f0)
+    return Pair(θ / (2 * pi) + 0.5f0, ϕ / pi)
 end
 
 function process_face(face, triangle_dest)
