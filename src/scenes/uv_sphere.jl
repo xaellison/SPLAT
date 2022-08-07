@@ -2,6 +2,8 @@
 using Revise, LazyArrays, Parameters
 # NOTE: for GPU need KernelAbstractions, CUDAKernels for efficient tullio
 using CUDA, KernelAbstractions, CUDAKernels
+using GLMakie
+
 include("../geo.jl")
 include("../skys.jl")
 include("../tracer.jl")
@@ -138,5 +140,5 @@ function main()
     return reshape(Array(RGB), (height,width))
 end
 
-@time RGB= main()
+CUDA.@time RGB= main()
 image(RGB)

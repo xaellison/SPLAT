@@ -77,17 +77,18 @@ function typemax(::Type{Tuple{Float32,Int32}})
     return (Inf32, one(Int32))
 end
 
-function hit_argmin(n_t, r::ADRay) :: Tuple{Tuple{Float32, Float32}, Int32}
-    return get_hit(n_t, r)[1:2]
+function hit_argmin(n_t, r::ADRay) :: Tuple{Float32, Int32}
+    hit = get_hit(n_t, r)
+    return (hit[1][1], hit[2])
 end
 
 function hit_argmin(n_t, r::FastRay) :: Tuple{Float32, Int32}
     return get_hit(n_t, r)[1:2]
 end
 
-function next_hit!(dest, rays, n_tris)
+function next_hit!(dest, tmp, rays, n_tris)
     # TODO: restore tmp as function arg?
-    @tullio (min) tmp[i] := hit_argmin(n_tris[j], rays[i])
+    @tullio (min) tmp[i] = hit_argmin(n_tris[j], rays[i])
     d_view = @view dest[:]
     d_view = reshape(d_view, length(d_view))
     map!(x->x[2], d_view, tmp)
@@ -270,7 +271,9 @@ function ad_frame_matrix(
     begin
         # FIXME
         dv .= V3.(CUDA.rand(Float32, height, width), CUDA.rand(Float32, height, width), CUDA.rand(Float32, height, width))
-        rays .= reshape(init_ray.(row_indices, col_indices, 550.0, dv), height * width)
+        rays = reshape(rays, height, width)
+        rays .= init_ray.(row_indices, col_indices, 550.0, dv)
+        rays = reshape(rays, height * width)
         cutoff = length(rays)
 
         for iter = 1:depth
@@ -280,7 +283,7 @@ function ad_frame_matrix(
             r_view = @view rays[1:cutoff]
             #@info "$(length(r_view)) / $(length(rays)) = $(length(r_view) / length(rays))"
             #@info "hits..."
-            next_hit!(h_view, r_view, n_tris)
+            next_hit!(h_view, tmp, r_view, n_tris)
 
             # evolve rays optically
             rand!(rndm)
@@ -314,7 +317,7 @@ function ad_frame_matrix(
          begin
             expansion .= expand.(rays, λ)
             hits .= Int32(1)
-            next_hit!(hits, expansion, n_tris)
+            next_hit!(hits, tmp, expansion, n_tris)
             tri_view = @view tris[hits]
         end
 
