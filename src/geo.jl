@@ -62,6 +62,8 @@ struct FastRay <: AbstractRay
     ignore_tri::Int
 end
 
+FastRay(adray :: ADRay) = FastRay(adray.pos, adray.dir, adray.ignore_tri)
+
 Base.zero(::V3) = V3(0.0f0, 0.0f0, 0.0f0)
 
 Base.zero(::Type{FastRay}) = FastRay(zero(V3), zero(V3), 1)

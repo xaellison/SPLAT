@@ -78,8 +78,7 @@ function typemax(::Type{Tuple{Float32,Int32}})
 end
 
 function hit_argmin(n_t, r::ADRay) :: Tuple{Float32, Int32}
-    hit = get_hit(n_t, r)
-    return (hit[1][1], hit[2])
+    return hit_argmin(n_t, FastRay(r))
 end
 
 function hit_argmin(n_t, r::FastRay) :: Tuple{Float32, Int32}
