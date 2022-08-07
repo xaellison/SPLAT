@@ -269,7 +269,7 @@ function ad_frame_matrix(
 
     #@info "Stage 1: AD tracing depth = $depth"
     begin
-        # FIXME
+        # FIXME - dv is the only alloc in stage 1
         dv .= V3.(CUDA.rand(Float32, height, width), CUDA.rand(Float32, height, width), CUDA.rand(Float32, height, width))
         rays = reshape(rays, height, width)
         rays .= init_ray.(row_indices, col_indices, 550.0, dv)
@@ -277,25 +277,20 @@ function ad_frame_matrix(
         cutoff = length(rays)
 
         for iter = 1:depth
-            # compute hits
-            #@info cutoff
             h_view = @view hit_idx[1:cutoff]
             r_view = @view rays[1:cutoff]
             #@info "$(length(r_view)) / $(length(rays)) = $(length(r_view) / length(rays))"
-            #@info "hits..."
-            next_hit!(h_view, tmp, r_view, n_tris)
-
+            tmp_view = @view tmp[1:cutoff]
+            next_hit!(h_view, tmp_view, r_view, n_tris)
             # evolve rays optically
             rand!(rndm)
-            tri_view = @view tris[hit_idx]
-            # I need to pass a scalar arg - this closure seems necessary since map! freaks at scalar args
-            evolve_closure(rays, hit_idx, tri_view, rndm) =
-                evolve_ray(rays, hit_idx, tri_view, rndm, first_diffuse)
-            map!(evolve_closure, rays, r_view, h_view, tri_view, rndm)
+            tri_view = @view tris[h_view]
+            rand_view = @view rndm[1:cutoff]
+            # everything has to be a view of the same size to avoid allocs + be sort safe
+            r_view .= evolve_ray.(r_view, h_view, tri_view, rand_view, first_diffuse)
 
             # retire appropriate rays
             if sort_optimization
-                #@info "retirement sort..."
                 sort!(r_view, by = ray -> ray.status)
                 cutoff = count(ray -> ray.status == RAY_STATUS_ACTIVE, r_view)
                 cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
@@ -325,6 +320,7 @@ function ad_frame_matrix(
 
         begin
             s(args...) = shade_tex(args..., tex)
+            # I tried pre-allocating α and it made it slower
             α = s.(expansion, hits, tri_view, first_diffuse)
             broadcast = (α .* retina_factor[:, :, n] .* intensity .* dλ)
             RGB3 .+= broadcast |> a -> reshape(a, length(rays), 3)

@@ -97,7 +97,7 @@ function scene_parameters()
 
 	tex = rand(Float32, 512, 512)
 
-    sort_optimization = false
+    sort_optimization = true
     camera_generator = my_moving_camera
     scalar_kwargs = Dict{Symbol, Any}()
     array_kwargs = Dict{Symbol, Any}()
