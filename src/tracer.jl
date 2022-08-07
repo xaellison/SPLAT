@@ -324,7 +324,7 @@ function ad_frame_matrix(
             s(args...) = shade_tex(args..., tex)
             α = s.(expansion, hits, tri_view, first_diffuse)
             broadcast = (α .* retina_factor[:, :, n] .* intensity .* dλ)
-            RGB3 .+= sum(broadcast, dims = 3) |> a -> reshape(a, length(rays), 3)
+            RGB3 .+= broadcast |> a -> reshape(a, length(rays), 3)
         end
     end
     map!(brightness -> clamp(brightness, 0, 1), RGB3, RGB3)
