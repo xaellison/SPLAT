@@ -109,40 +109,39 @@ function optical_normal(t::STri, pos :: V) :: V where V
     #return t[1]
     a, b, c = t[2], t[3], t[4]
     n_a, n_b, n_c = t[5], t[6], t[7]
-    det = (b[2] - c[2]) * (a[1] - c[1]) + (c[1] - b[1]) * (a[2] - c[2])
-    lambda1 = (b[2] - c[2]) * (pos[1] - c[1]) + (c[1] - b[1]) * (pos[2] - c[2])
-    lambda1 /= det
-    lambda2 = (c[2] - a[2]) * (pos[1] - c[1]) + (a[1] - c[1]) * (pos[2] - c[2])
-    lambda2 /= det
-    lambda3 = 1 - lambda1 - lambda2
-    lambda1 = clamp(lambda1, 0, 1)
-    lambda2 = clamp(lambda2, 0, 1)
-    lambda3 = clamp(lambda3, 0, 1)
-    return normalize(n_a * lambda1 + n_b * lambda2 + n_c * lambda3)
+    u, v = reverse_uv(pos, t)
+    return normalize(n_a * u + n_b * v + n_c * (1 - u - v))
 end
 
 function optical_normal(t::FTri, pos::V) :: V where V
     optical_normal(STri(t[1], t[2], t[3], t[4], t[5], t[6], t[7]), pos)
 end
 
-function reverse_uv(r, t)
-    reverse_uv(r.pos, t)
-end
 
-function reverse_uv(pos::V3, t::FTri) :: Pair{Float32, Float32}
-    a, b, c = t[2], t[3], t[4]
-    t_a, t_b, t_c = t[8], t[9], t[10]
-    det = (b[2] - c[2]) * (a[1] - c[1]) + (c[1] - b[1]) * (a[2] - c[2])
-    lambda1 = (b[2] - c[2]) * (pos[1] - c[1]) + (c[1] - b[1]) * (pos[2] - c[2])
-    lambda1 /= det
-    lambda2 = (c[2] - a[2]) * (pos[1] - c[1]) + (a[1] - c[1]) * (pos[2] - c[2])
-    lambda2 /= det
-    lambda3 = 1 - lambda1 - lambda2
-    lambda1 = clamp(lambda1, 0, 1)
-    lambda2 = clamp(lambda2, 0, 1)
-    lambda3 = clamp(lambda3, 0, 1)
-    t_vec = t_a * lambda1 + t_b * lambda2 + t_c * lambda3
-    return Pair(t_vec[1], t_vec[2])
+function reverse_uv(P, t)
+    # https://www.scratchapixel.com/lessons/3d-basic-rendering/ray-tracing-rendering-a-triangle/barycentric-coordinates
+    v0, v1, v2 = t[2], t[3], t[4]
+
+    v0v1 = v1 - v0;
+    v0v2 = v2 - v0;
+    #// no need to normalize
+    N = cross(v0v1, v0v2)
+    denom = dot(N, N)
+
+    edge1 = v2 - v1;
+    vp1 = P - v1;
+    C = cross(edge1, vp1);
+    u = dot(N, C)
+
+    #// edge 2
+    edge2 = v0 - v2;
+    vp2 = P - v2;
+    C = cross(edge2, vp2);
+    v = dot(N, C)
+
+    u /= denom;
+    v /= denom;
+    return Pair(u, v)
 end
 
 function reverse_uv(pos::V3, s::Sphere) :: Pair{Float32, Float32}

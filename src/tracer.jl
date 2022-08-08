@@ -172,7 +172,8 @@ function shade(r::FastRay, n, t, first_diffuse_index)::Float32
     if n >= first_diffuse_index
         # compute the position in the new triangle, set dir to zero
         u, v = reverse_uv(r.pos, t)
-        s = 0.1f0
+        return (u + v) /2
+        s = 0.5f0
         if xor(u % s > s / 2, v % s > s / 2)
             return 1.0f0
         else
@@ -195,9 +196,10 @@ function shade_tex(r::FastRay, n, t, first_diffuse_index, tex :: AbstractArray{F
     if n >= first_diffuse_index
         # compute the position in the new triangle, set dir to zero
         u, v = reverse_uv(r.pos, t)
+        CUDA.@assert !isnan(u) && !isnan(v)
         # it's theoretically possible u, v could come back as zero
-        i = max(1, Int(ceil(u * (size(tex)[1]))))
-        j = max(1, Int(ceil(v * (size(tex)[2]))))
+        i = clamp(Int(ceil(u * (size(tex)[1]))), 1, size(tex)[1])
+        j = clamp(Int(ceil(v * (size(tex)[2]))), 1, size(tex)[2])
         return tex[i, j]
     end
     if isinf(d)
@@ -319,6 +321,7 @@ function ad_frame_matrix(
 
         begin
             s(args...) = shade_tex(args..., tex)
+            #s(args...) = shade(args...)
             # I tried pre-allocating α and it made it slower
             α = s.(expansion, hits, tri_view, first_diffuse)
             broadcast = (α .* retina_factor[:, :, n] .* intensity .* dλ)

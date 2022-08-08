@@ -77,7 +77,7 @@ function scene_parameters()
         return get_camera(camera_pos, look_at, up, FOV)
     end
 
-    obj_path = "objs/sphere.obj"
+    obj_path = "objs/icos.obj"
 	glass_sphere = mesh_to_FTri(load(obj_path))
 	map!(t->translate(t, V3(3.0, 0, 0.0)), glass_sphere, glass_sphere)
 	V = V3(0, cos(0), sin(0))
@@ -87,7 +87,7 @@ function scene_parameters()
 	meshes = [[zero(FTri)], glass_sphere, diffuse_sphere]
 
 	tris = CuArray(foldl(vcat, meshes))
-
+	@info model_box(tris)
     n_tris = collect(zip(map(Int32, collect(1:length(tris))), tris)) |>
         m -> reshape(m, 1, length(m))
 
@@ -95,7 +95,9 @@ function scene_parameters()
 
     first_diffuse =  1 + 1 + tris_per_sphere
 
-	tex = rand(Float32, 64, 64)
+	# this is super low rez, but will appear higher on surface since so many
+	# tris per texel (that aren't proximal)
+	tex = rand(Float32, 16, 16)
 
     sort_optimization = false
     camera_generator = my_moving_camera
