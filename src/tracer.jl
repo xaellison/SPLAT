@@ -195,7 +195,7 @@ function shade_tex(r::FastRay, n, t, first_diffuse_index, tex :: AbstractArray{F
 
     if n >= first_diffuse_index
         # compute the position in the new triangle, set dir to zero
-        u, v = reverse_uv(r.pos, t)
+        u, v = tex_uv(r.pos, t)
         CUDA.@assert !isnan(u) && !isnan(v)
         # it's theoretically possible u, v could come back as zero
         i = clamp(Int(ceil(u * (size(tex)[1]))), 1, size(tex)[1])

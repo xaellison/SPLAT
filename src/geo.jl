@@ -117,8 +117,19 @@ function optical_normal(t::FTri, pos::V) :: V where V
     optical_normal(STri(t[1], t[2], t[3], t[4], t[5], t[6], t[7]), pos)
 end
 
+function tex_uv(P, t)
+    u, v = reverse_uv(P, t)
+    w = (1 - u - v)
+    uvw = (u, v, w)
+    U = (t[8][1], t[9][1], t[10][1])
+    V = (t[8][2], t[9][2], t[10][2])
+    return Pair(sum(U .* uvw), sum(V .* uvw))
+end
+
 
 function reverse_uv(P, t)
+    # returns barycentric coords describing position of P in t. Not to be
+    # confused with texture uv coords
     # https://www.scratchapixel.com/lessons/3d-basic-rendering/ray-tracing-rendering-a-triangle/barycentric-coordinates
     v0, v1, v2 = t[2], t[3], t[4]
 
