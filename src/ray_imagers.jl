@@ -12,7 +12,6 @@ function shade(r::FastRay, n, t, first_diffuse_index)::Float32
     if n >= first_diffuse_index
         # compute the position in the new triangle, set dir to zero
         u, v = reverse_uv(r.pos, t)
-        return (u + v) /2
         s = 0.5f0
         if xor(u % s > s / 2, v % s > s / 2)
             return 1.0f0
@@ -36,7 +35,6 @@ function shade(adr::ADRay, n, t, first_diffuse_index, λ)::Float32
     if n >= first_diffuse_index
         # compute the position in the new triangle, set dir to zero
         u, v = reverse_uv(r.pos, t)
-        return u
         s = 0.5f0
         if xor(u % s > s / 2, v % s > s / 2)
             return 1.0f0

@@ -61,6 +61,7 @@ function scene_parameters()
     hits = Array{Int32}(undef, size(expansion))
     tmp = Array{Tuple{Float32, Int32}}(undef, size(expansion))
     rndm = rand(Float32, height * width)
+    α = Array{Float32}(undef, (length(rays), 3))
 
     θ = 0.0f0
 
@@ -77,12 +78,17 @@ function scene_parameters()
     tris = [
         Sphere(zero(V3), 0.0f0),
         Sphere(V3(3, 0, 0), 1.0f0),
-        Sphere(V3(-3, cos(θ), sin(θ)), 1.0f0),
+        Sphere(V3(-1, cos(θ), sin(θ)), 1.0f0),
     ]
     n_tris = collect(zip(map(Int32, collect(1:length(tris))), tris)) |>
         m -> reshape(m, 1, length(m))
 
-    tex = CUDA.rand(Float32, 512, 512)
+    tex = let
+        x = collect(1:64)
+        y = collect(1:64) |> a -> reshape(a, 1, length(a))
+        z = CuArray(map(Float32, (x .+ y) .% 2))
+    end
+    #    CUDA.rand(Float32, 64, 64)
 
     first_diffuse = 3
     sort_optimization = false
@@ -122,13 +128,12 @@ end
 function main()
     skw, akw = scene_parameters()
     akw = Dict(kv[1]=>CuArray(kv[2]) for kv in akw)
-    ad_frame_matrix(;skw..., akw...)
+    CUDA.@time ad_frame_matrix(;skw..., akw...)
     @unpack RGB = akw
     @unpack height, width = skw
     RGB = Array(RGB)
     return reshape(RGB, (height,width))
 end
 main()
-main()
- CUDA.@time RGB= main()
+RGB= main()
 image(RGB)

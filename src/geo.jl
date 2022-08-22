@@ -164,7 +164,6 @@ function reverse_uv(pos::V3, s::Sphere) :: Pair{Float32, Float32}
     # maximum(reverse_uv(rand(V3), Sphere(V3(0.5,0.5,0.5), 1))[1] for i in 1:10000)
     x, y, z = normalize(pos - s.origin)
     ϕ = atan(sqrt(x^2 + y^2), z)
-    y, z, x= x, y, z
     θ = atan(y, x)
     return Pair(θ / (2 * pi) + 0.5f0, ϕ / pi)
 end
