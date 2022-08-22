@@ -10,7 +10,7 @@ using Tullio
 
 import Random.rand!
 
-function get_hit(n_s::Tuple{Int32,Sphere}, r::AbstractRay)
+function get_hit(n_s::Tuple{Int32,Sphere}, r::AbstractRay; kwargs...)
     # https://en.wikipedia.org/wiki/Line%E2%80%93sphere_intersection
     n, s = n_s
     if s.radius <= 0
@@ -23,7 +23,7 @@ function get_hit(n_s::Tuple{Int32,Sphere}, r::AbstractRay)
     return (d, n, s)
 end
 
-function get_hit(n_s::Tuple{Int32,Sphere}, r::ADRay)
+function get_hit(n_s::Tuple{Int32,Sphere}, r::ADRay; kwargs...)
     n, s = n_s
     if s.radius <= 0
         return ((Inf32, Inf32), one(Int32), s)
@@ -50,7 +50,8 @@ end
 
 function get_hit(
     n_t::Tuple{Int32,T},
-    r::ADRay,
+    r::ADRay;
+    kwargs...
 )::Tuple{Tuple{Float32,Float32},Int32,T} where {T}
     n, t = n_t
     # for n = 1, the degenerate triangle, this will be NaN, which fails d0 > 0 below

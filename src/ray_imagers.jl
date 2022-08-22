@@ -82,7 +82,7 @@ function shade_tex(adr::ADRay, n, t, first_diffuse_index, λ, tex :: AbstractArr
     if n >= first_diffuse_index
         # compute the position in the new triangle, set dir to zero
         u, v = tex_uv(r.pos, t)
-        
+
         CUDA.@assert !isnan(u) && !isnan(v)
         # it's theoretically possible u, v could come back as zero
         i = clamp(Int(ceil(u * (size(tex)[1]))), 1, size(tex)[1])
@@ -106,7 +106,7 @@ function continuum_shade(RGB3, RGB, tris, hits, tmp, rays, n_tris, spectrum, exp
 
     s(args...) = shade_tex(args..., tex)
     #s(args...) = shade(args...)
-    broadcast = s.(rays, hits, tri_view, first_diffuse, spectrum) .* retina_factor .* intensity .* dλ
+    broadcast = @~ s.(rays, hits, tri_view, first_diffuse, spectrum) .* retina_factor .* intensity .* dλ
     # broadcast rule not implemeted for sum!
     RGB3 .= sum(broadcast, dims=3) |> a -> reshape(a, length(rays), 3)
 
