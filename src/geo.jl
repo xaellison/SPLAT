@@ -117,6 +117,10 @@ function optical_normal(t::FTri, pos::V) :: V where V
     optical_normal(STri(t[1], t[2], t[3], t[4], t[5], t[6], t[7]), pos)
 end
 
+function tex_uv(P, t::Sphere)
+    return reverse_uv(P, t)
+end
+
 function tex_uv(P, t)
     u, v = reverse_uv(P, t)
     w = (1 - u - v)

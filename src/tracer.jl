@@ -1,4 +1,6 @@
 include("material.jl")
+include("ray_generators.jl")
+include("ray_imagers.jl")
 include("rgb_spectrum.jl")
 
 using ForwardDiff
@@ -34,11 +36,12 @@ function get_hit(n_s::Tuple{Int32,Sphere}, r::ADRay)
     return ((d0, ForwardDiff.derivative(d, r.λ)), n, s)
 end
 
-function get_hit(n_t::Tuple{Int32,T}, r::AbstractRay)::Tuple{Float32,Int32,T} where {T}
+function get_hit(n_t::Tuple{Int32,T}, r::AbstractRay; unsafe=false)::Tuple{Float32,Int32,T} where {T}
+    # unsafe = true will ignore the in triangle test: useful for continuum_shade
     n, t = n_t
     d = distance_to_plane(r.pos, r.dir, t[2], t[1])
     p = r.pos + r.dir * d
-    if in_triangle(p, t[2], t[3], t[4]) && d > 0 && r.ignore_tri != n
+    if (unsafe || in_triangle(p, t[2], t[3], t[4])) && d > 0 && r.ignore_tri != n
         return (d, n, t)
     else
         return (Inf32, one(Int32), t)
@@ -163,51 +166,6 @@ function evolve_ray(r::ADRay, n, t, rndm, first_diffuse_index)::ADRay
     end
 end
 
-function shade(r::FastRay, n, t, first_diffuse_index)::Float32
-    # NB disregards in_medium
-    # evolve to hit a diffuse surface
-    d, n, t = get_hit((n, t), r)
-    r = FastRay(r.pos + r.dir * d, zero(V3), r.ignore_tri)
-
-    if n >= first_diffuse_index
-        # compute the position in the new triangle, set dir to zero
-        u, v = reverse_uv(r.pos, t)
-        return (u + v) /2
-        s = 0.5f0
-        if xor(u % s > s / 2, v % s > s / 2)
-            return 1.0f0
-        else
-            return 0.0f0
-        end
-    end
-    if isinf(d)
-        return 0.0f0# retire(r, RAY_STATUS_INFINITY)
-    end
-    return 0.0f0
-end
-
-
-function shade_tex(r::FastRay, n, t, first_diffuse_index, tex :: AbstractArray{Float32})::Float32
-    # NB disregards in_medium
-    # evolve to hit a diffuse surface
-    d, n, t = get_hit((n, t), r)
-    r = FastRay(r.pos + r.dir * d, zero(V3), r.ignore_tri)
-
-    if n >= first_diffuse_index
-        # compute the position in the new triangle, set dir to zero
-        u, v = tex_uv(r.pos, t)
-        CUDA.@assert !isnan(u) && !isnan(v)
-        # it's theoretically possible u, v could come back as zero
-        i = clamp(Int(ceil(u * (size(tex)[1]))), 1, size(tex)[1])
-        j = clamp(Int(ceil(v * (size(tex)[2]))), 1, size(tex)[2])
-        return tex[i, j]
-    end
-    if isinf(d)
-        return 0.0f0# retire(r, RAY_STATUS_INFINITY)
-    end
-    return 0.0f0
-end
-
 ## Wrap it all up
 
 function ad_frame_matrix(
@@ -240,40 +198,13 @@ function ad_frame_matrix(
     camera = camera_generator(1, 1)
     intensity = Float32(1 / ITERS)
 
-    function init_ray(x, y, λ, dv)::AbstractRay
-        _x, _y = x - height / 2, y - width / 2
-        scale = height * _COS_45 / camera.FOV_half_sin
-        _x /= scale
-        _y /= scale
-
-        _z = sqrt(1 - _x^2 - _y^2)
-        dir =
-            _x * camera.right +
-            _y * camera.up +
-            _z * camera.dir +
-            dv * 0.25f0 / max(height, width)
-        dir = normalize(dir)
-        idx = (y - 1) * height + x
-        return ADRay(
-            camera.pos,
-            zero(V3),
-            dir,
-            zero(V3),
-            false,
-            1,
-            idx,
-            λ,
-            RAY_STATUS_ACTIVE,
-        )
-    end
-
-
     #@info "Stage 1: AD tracing depth = $depth"
-    begin
+    CUDA.@time begin
         # FIXME - dv is the only alloc in stage 1
         dv .= V3.(CUDA.rand(Float32, height, width), CUDA.rand(Float32, height, width), CUDA.rand(Float32, height, width))
         rays = reshape(rays, height, width)
-        rays .= init_ray.(row_indices, col_indices, 550.0, dv)
+        cam_closure(args...) = camera_ray(camera, height, width, args...)
+        rays .= cam_closure.(row_indices, col_indices, 550.0, dv)
         rays = reshape(rays, height * width)
         cutoff = length(rays)
 
@@ -309,26 +240,7 @@ function ad_frame_matrix(
     # NB: we should also expand rays that have been dispersed AND go to infinity - the may have fringe intersections
     RGB3 .= 0.0f0
 
-    for (n, λ) in enumerate(spectrum)
-         begin
-            expansion .= expand.(rays, λ)
-            hits .= Int32(1)
-            next_hit!(hits, tmp, expansion, n_tris)
-            tri_view = @view tris[hits]
-        end
-
-        #@info "Stage 3: Images"
-
-        begin
-            s(args...) = shade_tex(args..., tex)
-            #s(args...) = shade(args...)
-            # I tried pre-allocating α and it made it slower
-            α = s.(expansion, hits, tri_view, first_diffuse)
-            broadcast = (α .* retina_factor[:, :, n] .* intensity .* dλ)
-            RGB3 .+= broadcast |> a -> reshape(a, length(rays), 3)
-        end
-    end
-    map!(brightness -> clamp(brightness, 0, 1), RGB3, RGB3)
-    RGB .= RGBf.(RGB3[:, 1], RGB3[:, 2], RGB3[:, 3])
+    #expansion_loop_shade(RGB3, RGB, tris, hits, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity, dλ, tex)
+    continuum_shade(RGB3, RGB, tris, hits, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity, dλ, tex)
     return nothing
 end

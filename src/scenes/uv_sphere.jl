@@ -9,8 +9,8 @@ include("../skys.jl")
 include("../tracer.jl")
 
 function scene_parameters()
-    width = 512
-    height = 512
+	width = 1024
+    height = 1024
     xmin = 1
     xmax = height
     ymin = 1
@@ -86,7 +86,7 @@ function scene_parameters()
 
 	meshes = [[zero(FTri)], glass_sphere, diffuse_sphere]
 
-	tris = CuArray(foldl(vcat, meshes))
+	tris = foldl(vcat, meshes)
 
     n_tris = collect(zip(map(Int32, collect(1:length(tris))), tris)) |>
         m -> reshape(m, 1, length(m))
@@ -101,6 +101,7 @@ function scene_parameters()
     camera_generator = my_moving_camera
     scalar_kwargs = Dict{Symbol, Any}()
     array_kwargs = Dict{Symbol, Any}()
+	ugg = 1
     @pack! scalar_kwargs =  width,
                             height,
                             dλ,
