@@ -7,8 +7,8 @@ include("../tracer.jl")
 include("../utils.jl")
 
 function scene_parameters()
-    width = 1024
-    height = 1024
+    width = 512
+    height = 512
     dλ = 5.0f0
     λ_min = 400.0f0
     λ_max = 700.0f0
@@ -18,7 +18,7 @@ function scene_parameters()
 	basic_params = Dict{Symbol, Any}()
 	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth
 
-	datastructs = scene_datastructs(;basic_params...)
+	datastructs = scene_datastructs(CuArray ;basic_params...)
 
     θ = 0.0f0
 
@@ -51,6 +51,9 @@ function scene_parameters()
     sort_optimization = false
     cam = my_moving_camera(1, 1)
 	ray_generator(x, y, λ, dv) = camera_ray(cam, height, width, x, y, λ, dv)
+
+	rays = wrap_ray_gen(ray_generator; datastructs...)
+
     scalar_kwargs = Dict{Symbol, Any}()
     array_kwargs = Dict{Symbol, Any}()
     @pack! scalar_kwargs =  first_diffuse,
@@ -59,7 +62,7 @@ function scene_parameters()
 
 	scalar_kwargs = merge(scalar_kwargs, basic_params)
 
-    @pack! array_kwargs = tex, tris, n_tris
+    @pack! array_kwargs = tex, tris, n_tris, rays
 	array_kwargs = merge(array_kwargs, datastructs)
 
     return scalar_kwargs, array_kwargs
@@ -68,7 +71,7 @@ end
 function main()
     skw, akw = scene_parameters()
     akw = Dict(kv[1]=>CuArray(kv[2]) for kv in akw)
-    CUDA.@time ad_frame_matrix(;skw..., akw...)
+    CUDA.@time run_evolution(;skw..., akw...)
     @unpack RGB = akw
     @unpack height, width = skw
     RGB = Array(RGB)

@@ -169,9 +169,8 @@ end
 
 ## Wrap it all up
 
-function ad_frame_matrix(
-    ;ray_generator::Function,
-    height::Int,
+function run_evolution(
+    ;height::Int,
     width::Int,
     dλ,
     depth,
@@ -198,11 +197,7 @@ function ad_frame_matrix(
     #@info "Stage 1: AD tracing depth = $depth"
     begin
         # FIXME - dv is the only alloc in stage 1
-        dv .= V3.(CUDA.rand(Float32, height, width), CUDA.rand(Float32, height, width), CUDA.rand(Float32, height, width))
-        rays = reshape(rays, height, width)
-    #    cam_closure(args...) =
-        rays .= ray_generator.(row_indices, col_indices, 550.0, dv)
-        rays = reshape(rays, height * width)
+
         cutoff = length(rays)
 
         for iter = 1:depth

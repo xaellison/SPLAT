@@ -41,3 +41,13 @@ function simple_light(center, dir, δ1, δ2, height, width, x, y, λ)
                  RAY_STATUS_ACTIVE
                  )
 end
+
+function wrap_ray_gen(ray_generator; rays, row_indices, col_indices, dv, kwargs...)
+    height = length(row_indices)
+    width = length(col_indices)
+    @assert length(rays) == width * height
+    dv .= V3.(CUDA.rand(Float32, height, width), CUDA.rand(Float32, height, width), CUDA.rand(Float32, height, width))
+    rays = reshape(rays, height, width)
+    rays .= ray_generator.(row_indices, col_indices, 550.0, dv)
+    rays = reshape(rays, height * width)
+end

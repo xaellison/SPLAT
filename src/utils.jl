@@ -1,12 +1,12 @@
-function scene_datastructs(;width, height, dλ, λ_min, λ_max, depth)
-    RGB3 = Array{Float32}(undef, width * height, 3)
-    RGB = Array{RGBf}(undef, width * height)
+function scene_datastructs(A; width, height, dλ, λ_min, λ_max, depth)
+    RGB3 = A{Float32}(undef, width * height, 3)
+    RGB = A{RGBf}(undef, width * height)
 
-    row_indices = Array(1:height)
-    col_indices = reshape(Array(1:width), 1, width)
-    rays = Array{ADRay}(undef, width * height)
-    hit_idx = Array(zeros(Int32, length(rays)))
-    dv = Array{V3}(undef, height, width) # make w*h
+    row_indices = A(1:height)
+    col_indices = reshape(A(1:width), 1, width)
+    rays = A{ADRay}(undef, width * height)
+    hit_idx = A(zeros(Int32, length(rays)))
+    dv = A{V3}(undef, height, width) # make w*h
 
     # use host to compute constants used in turning spectra into colors
     spectrum = collect(λ_min:dλ:λ_max) |> a -> reshape(a, 1, 1, length(a))
@@ -20,11 +20,11 @@ function scene_datastructs(;width, height, dλ, λ_min, λ_max, depth)
     map!(retina_blue, begin
         @view retina_factor[1, 3, :]
     end, spectrum)
-
+    retina_factor  = A(retina_factor)
 
     # Datastruct init
-    expansion = Array{FastRay}(undef, (length(rays)))
-    tmp = Array{Tuple{Float32, Int32}}(undef, size(expansion))
+    expansion = A{FastRay}(undef, (length(rays)))
+    tmp = A{Tuple{Float32, Int32}}(undef, size(expansion))
     rndm = rand(Float32, height * width)
     out = Dict{Symbol, Any}()
     @pack! out = RGB,
