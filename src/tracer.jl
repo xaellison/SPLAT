@@ -200,7 +200,7 @@ function ad_frame_matrix(
     intensity = Float32(1 / ITERS)
 
     #@info "Stage 1: AD tracing depth = $depth"
-    CUDA.@time begin
+    begin
         # FIXME - dv is the only alloc in stage 1
         dv .= V3.(CUDA.rand(Float32, height, width), CUDA.rand(Float32, height, width), CUDA.rand(Float32, height, width))
         rays = reshape(rays, height, width)
@@ -242,6 +242,7 @@ function ad_frame_matrix(
     RGB3 .= 0.0f0
 
     #expansion_loop_shade(RGB3, RGB, tris, hits, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity, dλ, tex)
-    continuum_shade(RGB3, RGB, tris, hits, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity, dλ, tex)
+    #continuum_shade(RGB3, RGB, tris, hits, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity, dλ, tex)
+    light_map2!(RGB3, RGB, tris, hits, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity, dλ, tex)
     return nothing
 end

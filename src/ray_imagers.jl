@@ -134,3 +134,93 @@ function expansion_loop_shade(RGB3, RGB, tris, hits, tmp, rays, n_tris, spectrum
     map!(brightness -> clamp(brightness, 0, 1), RGB3, RGB3)
     RGB .= RGBf.(RGB3[:, 1], RGB3[:, 2], RGB3[:, 3])
 end
+
+
+function atomic_light_kernel(rays ::AbstractArray{FastRay}, hits, tris, first_diffuse_index, spectrum, R, G, B, tex )
+    idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    r = rays[idx]
+    n = hits[idx]
+    t = tris[idx]
+    if n >= first_diffuse_index
+        d, n, t = get_hit((n, t), r, unsafe=true)
+        r = FastRay(r.pos + r.dir * d, zero(V3), r.ignore_tri)
+
+        u, v = tex_uv(r.pos, t)
+        if !isnan(u) && !isnan(v) && !isinf(u) && !isinf(v)
+            # it's theoretically possible u, v could come back as zero
+            A = 1024 # equal to image height
+            i = clamp(Int(ceil(u * A)), 1, A)
+            j = clamp(Int(ceil(v * A)), 1, A)
+
+            CUDA.@atomic tex[(i - 1) * A + j, 1] += R
+            CUDA.@atomic tex[(i - 1) * A + j, 2] += G
+            CUDA.@atomic tex[(i - 1) * A + j, 3] += B
+
+        end
+    end
+    nothing
+end
+
+function atomic_light_kernel(rays ::AbstractArray{ADRay}, hits, tris, first_diffuse_index, spectrum, retina, tex )
+    idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    adr = rays[idx]
+    n = hits[idx]
+    t = tris[idx]
+    if n >= first_diffuse_index
+        for (n_λ, λ) in enumerate(spectrum)
+            r = expand(adr, λ)
+            d, n, t = get_hit((n, t), r, unsafe=true)
+            r = FastRay(r.pos + r.dir * d, zero(V3), r.ignore_tri)
+
+            u, v = tex_uv(r.pos, t)
+            if !isnan(u) && !isnan(v) && !isinf(u) && !isinf(v)
+                # it's theoretically possible u, v could come back as zero
+                A = 1024
+                i = clamp(Int(ceil(u * A)), 1, A)
+                j = clamp(Int(ceil(v * A)), 1, A)
+
+                CUDA.@atomic tex[(i - 1) * A + j, 1] += retina[1, 1, n_λ]
+                CUDA.@atomic tex[(i - 1) * A + j, 2] += retina[1, 2, n_λ]
+                CUDA.@atomic tex[(i - 1) * A + j, 3] += retina[1, 3, n_λ]
+
+            end
+        end
+    end
+    nothing
+end
+
+function light_map!(RGB3, RGB, tris, hits, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity, dλ, tex)
+
+    for (n_λ, λ) in enumerate(spectrum)
+        expansion .= expand.(rays, λ)
+        hits .= Int32(1)
+        next_hit!(hits, tmp, expansion, n_tris)
+        tri_view = @view tris[hits]
+
+        @assert length(rays) % 256 == 0
+        @assert length(rays) == length(hits) == length(tri_view)
+        @assert eltype(retina_factor) == eltype(RGB3)
+        @info size(RGB3)
+        @cuda blocks=length(rays) ÷ 256 threads=256 atomic_light_kernel(expansion, hits, tri_view, first_diffuse, spectrum, retina_factor[1, :, n_λ]..., RGB3)
+        synchronize()
+
+    end
+
+    RGB .= RGBf.(RGB3[:, 1], RGB3[:, 2], RGB3[:, 3])
+end
+
+function light_map2!(RGB3, RGB, tris, hits, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity, dλ, tex)
+
+    hits .= Int32(1)
+    next_hit!(hits, tmp, rays, n_tris)
+    tri_view = @view tris[hits]
+
+    @assert length(rays) % 256 == 0
+    @assert length(rays) == length(hits) == length(tri_view)
+    @assert eltype(retina_factor) == eltype(RGB3)
+    @info size(RGB3)
+    @cuda blocks=length(rays) ÷ 256 threads=256 atomic_light_kernel(rays, hits, tri_view, first_diffuse, spectrum, retina_factor, RGB3)
+    synchronize()
+
+    RGB .= RGBf.(RGB3[:, 1], RGB3[:, 2], RGB3[:, 3])
+end
