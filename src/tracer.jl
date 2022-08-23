@@ -175,7 +175,6 @@ function ad_frame_matrix(
     width::Int,
     dλ,
     depth,
-    ITERS,
     sort_optimization,
     first_diffuse,
     RGB3,
@@ -187,20 +186,15 @@ function ad_frame_matrix(
     rays,
     hit_idx,
     dv,
-    s0,
-    hits,
     tmp,
     rndm,
     expansion,
     spectrum,
     retina_factor,
     tex,
+    kwargs...
 ) where {T}
-    camera =
-    # not sure when/how 25nm became the correctly normalized dλ but here we adapt
-    # to other values
-    intensity = Float32(1 / ITERS)
-
+    intensity = 1.0f0
     #@info "Stage 1: AD tracing depth = $depth"
     begin
         # FIXME - dv is the only alloc in stage 1
@@ -244,7 +238,7 @@ function ad_frame_matrix(
     RGB3 .= 0.0f0
 
     #expansion_loop_shade(RGB3, RGB, tris, hits, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity, dλ, tex)
-    #continuum_shade(RGB3, RGB, tris, hits, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity, dλ, tex)
-    light_map2!(RGB3, RGB, tris, hits, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity, dλ, tex)
+    continuum_shade(RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity, dλ, tex)
+    #light_map2!(RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity, dλ, tex)
     return nothing
 end

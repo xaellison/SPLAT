@@ -7,63 +7,21 @@ using GLMakie
 include("../geo.jl")
 include("../skys.jl")
 include("../tracer.jl")
+include("../utils.jl")
 
 function scene_parameters()
 	width = 1024
     height = 1024
-    xmin = 1
-    xmax = height
-    ymin = 1
-    ymax = width
-
-    dλ = 25.0f0
+    dλ = 5.0f0
     λ_min = 400.0f0
     λ_max = 700.0f0
-
-    depth = 2
+    depth = 3
     ITERS = 1
 
-    x = collect(xmin:xmax)#LinRange(-2, 1, 200)
-    y = collect(ymin:ymax)#LinRange(-1.1, 1.1, 200)
-    function init(x, y)
-        RGBf(rand(), rand(), rand())
-    end
-    img = init.(x, y')
-    #fig, ax, hm = image(x, y, img)
-    #display(fig)
+	basic_params = Dict{Symbol, Any}()
+	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth
 
-    RGB3 = Array{Float32}(undef, width * height, 3)
-    RGB = Array{RGBf}(undef, width * height)
-
-    row_indices = Array(1:height)
-    col_indices = reshape(Array(1:width), 1, width)
-    rays = Array{ADRay}(undef, width * height)
-    hit_idx = Array(zeros(Int32, length(rays)))
-    dv = Array{V3}(undef, height, width) # make w*h
-    s0 = Array{Float32}(undef, length(rays), 3)
-
-
-    # use host to compute constants used in turning spectra into colors
-    spectrum = collect(λ_min:dλ:λ_max) |> a -> reshape(a, 1, 1, length(a))
-    retina_factor = Array{Float32}(undef, 1, 3, length(spectrum))
-    map!(retina_red, begin
-        @view retina_factor[1, 1, :]
-    end, spectrum)
-    map!(retina_green, begin
-        @view retina_factor[1, 2, :]
-    end, spectrum)
-    map!(retina_blue, begin
-        @view retina_factor[1, 3, :]
-    end, spectrum)
-
-    retina_factor = Array(retina_factor)
-    spectrum = Array(spectrum)
-
-    # Datastruct init
-    expansion = Array{FastRay}(undef, length(rays))
-    hits = Array{Int32}(undef, size(expansion))
-    tmp = Array{Tuple{Float32, Int32}}(undef, size(expansion))
-    rndm = rand(Float32, height * width)
+	datastructs = scene_datastructs(;basic_params...)
 
     θ = 0.0f0
 
@@ -98,38 +56,19 @@ function scene_parameters()
 	tex = rand(Float32, 64, 64)
 
     sort_optimization = false
-    
+
 	cam = my_moving_camera(1, 1)
 	ray_generator(x, y, λ, dv) = camera_ray(cam, height, width, x, y, λ, dv)
     scalar_kwargs = Dict{Symbol, Any}()
     array_kwargs = Dict{Symbol, Any}()
-	ugg = 1
-    @pack! scalar_kwargs =  width,
-                            height,
-                            dλ,
-                            depth,
-                            ITERS,
-                            first_diffuse,
+    @pack! scalar_kwargs =  first_diffuse,
                             sort_optimization,
                             ray_generator
 
-    @pack! array_kwargs = RGB3,
-                          RGB,
-                          n_tris,
-                          tris,
-                          row_indices,
-                          col_indices,
-                          rays,
-                          hit_idx,
-                          dv,
-                          s0,
-                          expansion,
-                          hits,
-                          rndm,
-                          tmp,
-                          spectrum,
-                          retina_factor,
-						  tex
+	scalar_kwargs = merge(scalar_kwargs, basic_params)
+
+    @pack! array_kwargs = tex, tris, n_tris
+	array_kwargs = merge(array_kwargs, datastructs)
 
     return scalar_kwargs, array_kwargs
 end
