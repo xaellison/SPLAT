@@ -170,7 +170,7 @@ end
 ## Wrap it all up
 
 function ad_frame_matrix(
-    ;camera_generator::Function,
+    ;ray_generator::Function,
     height::Int,
     width::Int,
     dλ,
@@ -196,7 +196,9 @@ function ad_frame_matrix(
     retina_factor,
     tex,
 ) where {T}
-    camera = camera_generator(1, 1)
+    camera =
+    # not sure when/how 25nm became the correctly normalized dλ but here we adapt
+    # to other values
     intensity = Float32(1 / ITERS)
 
     #@info "Stage 1: AD tracing depth = $depth"
@@ -204,8 +206,8 @@ function ad_frame_matrix(
         # FIXME - dv is the only alloc in stage 1
         dv .= V3.(CUDA.rand(Float32, height, width), CUDA.rand(Float32, height, width), CUDA.rand(Float32, height, width))
         rays = reshape(rays, height, width)
-        cam_closure(args...) = camera_ray(camera, height, width, args...)
-        rays .= cam_closure.(row_indices, col_indices, 550.0, dv)
+    #    cam_closure(args...) =
+        rays .= ray_generator.(row_indices, col_indices, 550.0, dv)
         rays = reshape(rays, height * width)
         cutoff = length(rays)
 

@@ -6,18 +6,18 @@ include("../skys.jl")
 include("../tracer.jl")
 
 function scene_parameters()
-    width = 512
-    height = 512
+    width = 1024
+    height = 1024
     xmin = 1
     xmax = height
     ymin = 1
     ymax = width
 
-    dλ = 25.0f0
+    dλ = 5.0f0
     λ_min = 400.0f0
     λ_max = 700.0f0
 
-    depth = 2
+    depth = 3
     ITERS = 1
 
     x = collect(xmin:xmax)#LinRange(-2, 1, 200)
@@ -92,7 +92,8 @@ function scene_parameters()
 
     first_diffuse = 3
     sort_optimization = false
-    camera_generator = my_moving_camera
+    cam = my_moving_camera(1, 1)
+	ray_generator(x, y, λ, dv) = camera_ray(cam, height, width, x, y, λ, dv)
     scalar_kwargs = Dict{Symbol, Any}()
     array_kwargs = Dict{Symbol, Any}()
     @pack! scalar_kwargs =  width,
@@ -102,7 +103,7 @@ function scene_parameters()
                             ITERS,
                             first_diffuse,
                             sort_optimization,
-                            camera_generator
+                            ray_generator
 
     @pack! array_kwargs = RGB3,
                           RGB,

@@ -168,6 +168,30 @@ function reverse_uv(pos::V3, s::Sphere) :: Pair{Float32, Float32}
     return Pair(θ / (2 * pi) + 0.5f0, ϕ / pi)
 end
 
+function texel_scaling(r, t::FTri)
+    uv_area = norm(cross(t[8] - t[9], t[10] - t[8]))
+    spatial_area = norm(cross(t[2] - t[4], t[3] - t[4]))
+    # consider two tris, same uv area, areas = 1, 2: 2x as many rays
+    # will hit the larger, but they should be the same color, so each
+    # ray hitting the larger should be scaled by 1/2
+    return uv_area / spatial_area
+end
+
+function texel_scaling(r, s::Sphere)
+    u, v = reverse_uv(r.pos, s)
+    return abs(1 / sin(v * pi)) / 100.0f0
+end
+
+function cosine_shading(r, t::FTri)
+    abs(dot(normalize(t[1]), normalize(r.dir)))
+end
+
+function cosine_shading(r, s::Sphere)
+    n = normalize(r.pos - s.origin)
+    abs(dot(n, normalize(r.dir)))
+end
+
+
 function process_face(face, triangle_dest)
     # face is a face of vertex indices which may be a polygon of degree > 3.
     # this function breaks that face into triangles and inserts them to tri_dest.

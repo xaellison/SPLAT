@@ -9,8 +9,8 @@ include("../skys.jl")
 include("../tracer.jl")
 
 function scene_parameters()
-    width = 512
-    height = 512
+    width = 1024
+    height = 1024
     xmin = 1
     xmax = height
     ymin = 1
@@ -69,7 +69,7 @@ function scene_parameters()
 
     θ += 2 * π / 360
     function my_moving_camera(frame_i, frame_n)
-        camera_pos = V3((7, 0, 0)) #+ centroid
+        camera_pos = V3((7, 0, 0.2)) #+ centroid
         look_at = zero(V3)
         up = V3((0.0, 0.0, -1.0))
         FOV = 45.0 * pi / 180.0
@@ -86,7 +86,7 @@ function scene_parameters()
 
 	meshes = [[zero(FTri)], glass_sphere, diffuse_sphere]
 
-	tris = CuArray(foldl(vcat, meshes))
+	tris = foldl(vcat, meshes)
 	@info model_box(tris)
     n_tris = collect(zip(map(Int32, collect(1:length(tris))), tris)) |>
         m -> reshape(m, 1, length(m))
@@ -95,12 +95,11 @@ function scene_parameters()
 
     first_diffuse =  1 + 1 + tris_per_sphere
 
-	# this is super low rez, but will appear higher on surface since so many
-	# tris per texel (that aren't proximal)
-	tex = rand(Float32, 16, 16)
+	tex = rand(Float32, 64, 64)
 
     sort_optimization = false
-    camera_generator = my_moving_camera
+	cam = my_moving_camera(1, 1)
+	ray_generator(x, y, λ, dv) = camera_ray(cam, height, width, x, y, λ, dv)
     scalar_kwargs = Dict{Symbol, Any}()
     array_kwargs = Dict{Symbol, Any}()
     @pack! scalar_kwargs =  width,
@@ -110,7 +109,7 @@ function scene_parameters()
                             ITERS,
                             first_diffuse,
                             sort_optimization,
-                            camera_generator
+                            ray_generator
 
     @pack! array_kwargs = RGB3,
                           RGB,

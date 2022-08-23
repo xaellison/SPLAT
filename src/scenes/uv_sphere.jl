@@ -98,7 +98,9 @@ function scene_parameters()
 	tex = rand(Float32, 64, 64)
 
     sort_optimization = false
-    camera_generator = my_moving_camera
+    
+	cam = my_moving_camera(1, 1)
+	ray_generator(x, y, λ, dv) = camera_ray(cam, height, width, x, y, λ, dv)
     scalar_kwargs = Dict{Symbol, Any}()
     array_kwargs = Dict{Symbol, Any}()
 	ugg = 1
@@ -109,7 +111,7 @@ function scene_parameters()
                             ITERS,
                             first_diffuse,
                             sort_optimization,
-                            camera_generator
+                            ray_generator
 
     @pack! array_kwargs = RGB3,
                           RGB,
@@ -135,11 +137,11 @@ end
 function main()
     skw, akw = scene_parameters()
 	akw = Dict(kv[1]=>CuArray(kv[2]) for kv in akw)
-    ad_frame_matrix(;skw..., akw...)
+    CUDA.@time ad_frame_matrix(;skw..., akw...)
     @unpack RGB = akw
     @unpack height, width = skw
     return reshape(Array(RGB), (height,width))
 end
-
-CUDA.@time RGB= main()
+main()
+RGB = main()
 image(RGB)
