@@ -14,14 +14,14 @@
         return typemin(UInt32), zero(UInt32), zero(UInt32)
     end
     if f > 0
-        sign = f > 0 ? UInt32(1 << 31) : zero(UInt32)
+        sign = UInt32(1 << 31)
         # https://en.wikipedia.org/wiki/Single-precision_floating-point_format
         # See how exponent is interpretted as exponent - 127
         exp = (exponent(f) + 127) * 1 << 23 |> UInt32
         sig = significand(f) * 1 << 23 - 1 << 23 |> floor |> UInt32
     else
         # for negative numbers, larger exponent = more negative
-        sign = f > 0 ? UInt32(1 << 31) : zero(UInt32)
+        sign = zero(UInt32)
         exp = (127 - exponent(f)) * 1 << 23 |> UInt32
         # significand is signed. Again, effectively subtract int-string from max value
         sig = 1 << 23 + (significand(f) * 1 << 22) |> floor |> UInt32
