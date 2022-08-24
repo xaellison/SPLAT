@@ -18,13 +18,13 @@
         # https://en.wikipedia.org/wiki/Single-precision_floating-point_format
         # See how exponent is interpretted as exponent - 127
         exp = (exponent(f) + 127) * 1 << 23 |> UInt32
-        sig = significand(f) * 1 << 23 - 1 << 23 |> floor |> UInt32
+        sig = (significand(f) - 1) * 1 << 23 |> UInt32
     else
         # for negative numbers, larger exponent = more negative
         sign = zero(UInt32)
         exp = (127 - exponent(f)) * 1 << 23 |> UInt32
         # significand is signed. Again, effectively subtract int-string from max value
-        sig = 1 << 23 + (significand(f) * 1 << 22) |> floor |> UInt32
+        sig = (2 + significand(f)) * 1 << 23 |> UInt32
     end
 
     return sign, exp, sig
@@ -68,3 +68,5 @@ function test()
 end
 
 @assert test()
+using BenchmarkTools
+@benchmark unsafe_encode(f) setup=begin f= -rand(Float32) .- 0.5f0 end evals=10 samples=10
