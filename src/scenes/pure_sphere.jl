@@ -6,7 +6,7 @@ include("../skys.jl")
 include("../tracer.jl")
 include("../utils.jl")
 
-function scene_parameters()
+function main()
     width = 512
     height = 512
     dλ = 5.0f0
@@ -65,17 +65,13 @@ function scene_parameters()
     @pack! array_kwargs = tex, tris, n_tris, rays
 	array_kwargs = merge(array_kwargs, datastructs)
 
-    return scalar_kwargs, array_kwargs
-end
+    array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
+    CUDA.@time run_evolution(;scalar_kwargs..., array_kwargs...)
 
-function main()
-    skw, akw = scene_parameters()
-    akw = Dict(kv[1]=>CuArray(kv[2]) for kv in akw)
-    CUDA.@time run_evolution(;skw..., akw...)
-    @unpack RGB = akw
-    @unpack height, width = skw
+	light_map2!(;scalar_kwargs..., array_kwargs...)
+	@unpack RGB = array_kwargs
     RGB = Array(RGB)
-    return reshape(RGB, (height,width))
+    return reshape(RGB, (height, width))
 end
 main()
 RGB= main()
