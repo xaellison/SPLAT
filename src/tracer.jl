@@ -176,27 +176,17 @@ function run_evolution(
     depth,
     sort_optimization,
     first_diffuse,
-    RGB3,
-    RGB,
     n_tris,
     tris,
-    row_indices,
-    col_indices,
     rays,
     hit_idx,
-    dv,
     tmp,
     rndm,
-    expansion,
-    spectrum,
-    retina_factor,
-    tex,
     kwargs...
 ) where {T}
     intensity = 1.0f0
     #@info "Stage 1: AD tracing depth = $depth"
     begin
-        # FIXME - dv is the only alloc in stage 1
 
         cutoff = length(rays)
 
@@ -230,10 +220,10 @@ function run_evolution(
 
     #@info "Stage 2: Expansion (optimization then evaluation)"
     # NB: we should also expand rays that have been dispersed AND go to infinity - the may have fringe intersections
-    RGB3 .= 0.0f0
+    #RGB3 .= 0.0f0
 
     #expansion_loop_shade(RGB3, RGB, tris, hits, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity, dλ, tex)
-    continuum_shade(RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity, dλ, tex)
+
     #light_map2!(RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity, dλ, tex)
     return nothing
 end
