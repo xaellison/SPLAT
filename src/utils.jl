@@ -1,5 +1,6 @@
-function scene_datastructs(A; width, height, dλ, λ_min, λ_max, depth)
+function scene_datastructs(A; width, height, dλ, λ_min, λ_max, depth, kwargs...)
     RGB3 = A{Float32}(undef, width * height, 3)
+    RGB3 .= 0
     RGB = A{RGBf}(undef, width * height)
 
     row_indices = A(1:height)

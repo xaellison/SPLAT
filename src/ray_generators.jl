@@ -29,7 +29,7 @@ end
 
 function simple_light(center, dir, δ1, δ2, height, width, x, y, λ)
     # returns a rectangular cross-section, unidirectional light source
-    origin = center + δ1 * (height ÷ 2 - x) / (height ÷ 2) + δ2 * (width ÷ 2 - y) / (width ÷ 2)
+    origin = center + δ1 * (x - height ÷ 2) / (height ÷ 2) + δ2 * (y - width ÷ 2) / (width ÷ 2)
     return ADRay(origin,
                  zero(V3),
                  dir,
