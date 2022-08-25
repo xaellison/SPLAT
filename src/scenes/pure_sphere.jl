@@ -22,8 +22,8 @@ function main()
     θ += 2 * π / 360
 	tris = [
         Sphere(zero(V3), 0.0f0),
-        Sphere(V3(4, 0, 0), 1.0f0),
-        Sphere(V3(0, 1, 0), 1.0f0),
+        Sphere(V3(2.5, 3, 0), 1.0f0),
+        Sphere(V3(0, 0, 0), 1.0f0),
     ]
     n_tris = collect(zip(map(Int32, collect(1:length(tris))), tris)) |>
         m -> reshape(m, 1, length(m))
@@ -51,7 +51,7 @@ function main()
 
     cam = my_moving_camera(1, 1)
 
-	ray_generator(x, y, λ, dv) = simple_light(V3(0, -2, 0), V3(0, 1, 0), V3(-0.75, 0, 0), V3(0, 0, -0.75), height, width, x, y, λ)
+	ray_generator(x, y, λ, dv) = simple_light(V3(7, 7, 0), V3(-1/sqrt(2), -1/sqrt(2), 0), V3(1 / sqrt(2), -1/sqrt(2), 0), V3(0, 0, 1), height, width, x, y, λ, dv)
 #	ray_generator(x, y, λ, dv) = simple_light(V3(2, -2, -2), V3(-1, 0, 0), V3(0, 0, 4), V3(0, 4, 0), height, width, x, y, λ)
 
 	rays = wrap_ray_gen(ray_generator; datastructs...)

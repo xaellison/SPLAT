@@ -271,7 +271,7 @@ function spectral_light_map!(; tris, hit_idx, tmp, rays, n_tris, spectrum, first
 end
 
 
-function continuum_shade2(;RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity=1e-2, dλ, tex, kwargs...)
+function continuum_shade2(;RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity=1e-1, dλ, tex, kwargs...)
     RGB3 .= 0.0f0
 
     hit_idx .= Int32(1)
@@ -281,7 +281,9 @@ function continuum_shade2(;RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum
         tex_view = @view tex[:, :, n_λ]
         s(args...) = shade_tex(args..., tex_view)
         #s(args...) = shade(args...)
-        broadcast = @~ s.(rays, hit_idx, tri_view, first_diffuse, spectrum) .* retina_factor .* intensity .* dλ
+        @info size(retina_factor)
+        @info size(rays)
+        broadcast = @~ s.(rays, hit_idx, tri_view, first_diffuse, spectrum[:, :, n_λ]) .* retina_factor[:, :, n_λ] .* intensity .* dλ
         # broadcast rule not implemeted for sum!
         # WARNING this next line is ~90% of pure_sphere runtime at res=1024^2
         RGB3 .+= sum(broadcast, dims=3) |> a -> reshape(a, length(rays), 3)
