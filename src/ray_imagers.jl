@@ -271,7 +271,7 @@ function spectral_light_map!(; tris, hit_idx, tmp, rays, n_tris, spectrum, first
 end
 
 
-function continuum_shade2(;RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity=1, dλ, tex, kwargs...)
+function continuum_shade2(;RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity=1e-2, dλ, tex, kwargs...)
     RGB3 .= 0.0f0
 
     hit_idx .= Int32(1)
