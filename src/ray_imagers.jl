@@ -151,6 +151,7 @@ function atomic_light_kernel(rays ::AbstractArray{FastRay}, hits, tris, first_di
         if !isnan(u) && !isnan(v) && !isinf(u) && !isinf(v)
             # it's theoretically possible u, v could come back as zero
             A = 1024 # equal to image height
+            w, h = size()
             i = clamp(Int(ceil(u * A)), 1, A)
             j = clamp(Int(ceil(v * A)), 1, A)
 
@@ -209,12 +210,12 @@ function atomic_spectrum_kernel(rays ::AbstractArray{ADRay}, hits, tris, first_d
 
             if !isnan(u) && !isnan(v) && !isinf(u) && !isinf(v)
                 # it's theoretically possible u, v could come back as zero
-                A = 1024
-                i = clamp(Int(ceil(v * A)), 1, A)
-                j = clamp(Int(ceil(u * A)), 1, A)
+                w, h = size(tex)[1:2]
+                i = clamp(Int(ceil(u * w)), 1, w)
+                j = clamp(Int(ceil(v * h)), 1, h)
 
                 intensity = cosine_shading(r, t)
-                CUDA.@atomic tex[(i - 1) * A + j, n_λ] += intensity
+                CUDA.@atomic tex[i, j, n_λ] += intensity
             end
         end
     end
@@ -271,7 +272,7 @@ function spectral_light_map!(; tris, hit_idx, tmp, rays, n_tris, spectrum, first
 end
 
 
-function continuum_shade2(;RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity=1e-1, dλ, tex, kwargs...)
+function continuum_shade2(;RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity=0.1f0, dλ, tex, kwargs...)
     RGB3 .= 0.0f0
 
     hit_idx .= Int32(1)

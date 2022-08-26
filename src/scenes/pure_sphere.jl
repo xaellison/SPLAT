@@ -28,7 +28,7 @@ function main()
     n_tris = collect(zip(map(Int32, collect(1:length(tris))), tris)) |>
         m -> reshape(m, 1, length(m))
 
-    tex = CUDA.zeros(Float32, 1024^2, length(λ_min:dλ:λ_max))
+    tex = CUDA.zeros(Float32, 1024, 1024, length(λ_min:dλ:λ_max))
 
     first_diffuse = 3
 
@@ -36,7 +36,7 @@ function main()
 	basic_params = Dict{Symbol, Any}()
 	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, sort_optimization, first_diffuse
 
-	datastructs = scene_datastructs(CuArray; basic_params...)
+	@time datastructs = scene_datastructs(CuArray; basic_params...)
 
 	# Forward Trace light map
 
@@ -61,14 +61,13 @@ function main()
 	array_kwargs = merge(array_kwargs, datastructs)
 
     array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
-    CUDA.@time run_evolution(;basic_params..., array_kwargs...)
+    run_evolution(;basic_params..., array_kwargs...)
 
 	spectral_light_map!(;basic_params..., array_kwargs...)
 
 	# reverse trace image
 	@unpack RGB3 = array_kwargs
 	RGB3.=0
-	tex = reshape(tex, 1024, 1024, size(tex)[2])
 	ray_generator2(x, y, λ, dv) = camera_ray(cam, height, width, x, y, λ, dv)
 	rays = wrap_ray_gen(ray_generator2; datastructs...)
     array_kwargs = Dict{Symbol, Any}()
@@ -77,7 +76,7 @@ function main()
 	array_kwargs = merge(array_kwargs, datastructs)
 
     array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
-    CUDA.@time run_evolution(;basic_params..., array_kwargs...)
+    run_evolution(;basic_params..., array_kwargs...)
 
 	continuum_shade2(;basic_params..., array_kwargs...)
 
@@ -88,5 +87,5 @@ function main()
     return reshape(RGB, (height, width))
 end
 main()
-RGB= main()
+@time RGB = main()
 image(RGB)
