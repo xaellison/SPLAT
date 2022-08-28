@@ -90,9 +90,9 @@ function get_camera(pos, lookat, true_up, fov)
     # return a camera with normalized direction vectors and all fields populated
     # fov in radians
     dir = normalize(lookat - pos)
-    up = rotation_matrix(cross(dir, true_up), pi / 2) * dir
-    right = cross(dir, up)
-    right = normalize(right)
+    
+    right = normalize(cross(dir, true_up))
+    up = normalize(cross(right, dir))
 
     return Cam(pos, lookat, dir, up, right, sin(fov / 2))
 end
@@ -127,7 +127,7 @@ function tex_uv(P, t)
     uvw = (u, v, w)
     U = (t[8][1], t[9][1], t[10][1])
     V = (t[8][2], t[9][2], t[10][2])
-    return Pair(sum(U .* uvw), sum(V .* uvw))
+    return sum(U .* uvw), sum(V .* uvw)
 end
 
 
@@ -156,16 +156,16 @@ function reverse_uv(P, t)
 
     u /= denom;
     v /= denom;
-    return Pair(u, v)
+    return u, v
 end
 
-function reverse_uv(pos::V3, s::Sphere) :: Pair{Float32, Float32}
+function reverse_uv(pos::V3, s::Sphere) #:: Pair{Float32, Float32}
     # lazy test like: min/max [1]/[2]
     # maximum(reverse_uv(rand(V3), Sphere(V3(0.5,0.5,0.5), 1))[1] for i in 1:10000)
     x, y, z = normalize(pos - s.origin)
     ϕ = atan(sqrt(x^2 + y^2), z)
     θ = atan(y, x)
-    return Pair(θ / (2 * pi) + 0.5f0, ϕ / pi)
+    return θ / (2 * pi) + 0.5f0, ϕ / pi
 end
 
 function texel_scaling(r, t::FTri)
@@ -182,12 +182,8 @@ function texel_scaling(r, s::Sphere)
     return abs(1 / sin(v * pi)) / 100.0f0
 end
 
-function cosine_shading(r, t::FTri)
-    abs(dot(normalize(t[1]), normalize(r.dir)))
-end
-
-function cosine_shading(r, s::Sphere)
-    n = normalize(r.pos - s.origin)
+function cosine_shading(r, t)
+    n = optical_normal(t, r.pos)
     abs(dot(n, normalize(r.dir)))
 end
 
@@ -320,7 +316,7 @@ function model_box(vertices)
     return (min_x, max_x, min_y, max_y, min_z, max_z)
 end
 
-function model_box(tris::Array{T}) where {T <: Union{Tri, STri}}
+function model_box(tris::Array{T}) where {T <: Union{Tri, STri, FTri}}
     min_x = minimum(map(t -> minimum(map(v -> v[1], t[2:4])), tris))
     min_y = minimum(map(t -> minimum(map(v -> v[2], t[2:4])), tris))
     min_z = minimum(map(t -> minimum(map(v -> v[3], t[2:4])), tris))

@@ -53,7 +53,7 @@ function shade_tex(r::FastRay, n, t, first_diffuse_index, tex :: AbstractArray{F
     # NB disregards in_medium
     # evolve to hit a diffuse surface
     d, n, t = get_hit((n, t), r)
-    r = FastRay(r.pos + r.dir * d, zero(V3), r.ignore_tri)
+    r = FastRay(r.pos + r.dir * d, r.dir, r.ignore_tri)
 
     if n >= first_diffuse_index
         # compute the position in the new triangle, set dir to zero
@@ -62,7 +62,7 @@ function shade_tex(r::FastRay, n, t, first_diffuse_index, tex :: AbstractArray{F
         # it's theoretically possible u, v could come back as zero
         i = clamp(Int(ceil(u * (size(tex)[1]))), 1, size(tex)[1])
         j = clamp(Int(ceil(v * (size(tex)[2]))), 1, size(tex)[2])
-        return tex[i, j]
+        return tex[i, j] * cosine_shading(r, t)
     end
     if isinf(d)
         return 0.0f0# retire(r, RAY_STATUS_INFINITY)
@@ -75,7 +75,8 @@ function shade_tex(adr::ADRay, n, t, first_diffuse_index, λ, tex :: AbstractArr
     # evolve to hit a diffuse surface
     r = expand(adr, λ)
     d, n, t = get_hit((n, t), r, unsafe=true)
-    r = FastRay(r.pos + r.dir * d, zero(V3), r.ignore_tri)
+    # WARNING inconsistent ray defined
+    r = FastRay(r.pos + r.dir * d, r.dir, r.ignore_tri)
 
     if n >= first_diffuse_index
         # compute the position in the new triangle, set dir to zero
@@ -85,7 +86,7 @@ function shade_tex(adr::ADRay, n, t, first_diffuse_index, λ, tex :: AbstractArr
         # it's theoretically possible u, v could come back as zero
         i = clamp(Int(ceil(u * (size(tex)[1]))), 1, size(tex)[1])
         j = clamp(Int(ceil(v * (size(tex)[2]))), 1, size(tex)[2])
-        return tex[i, j]
+        return tex[i, j] * cosine_shading(r, t)
     end
     if isinf(d)
         return 0.0f0# retire(r, RAY_STATUS_INFINITY)
@@ -138,63 +139,6 @@ function expansion_loop_shade(RGB3, RGB, tris, hits, tmp, rays, n_tris, spectrum
 end
 
 
-function atomic_light_kernel(rays ::AbstractArray{FastRay}, hits, tris, first_diffuse_index, spectrum, R, G, B, tex )
-    idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-    r = rays[idx]
-    n = hits[idx]
-    t = tris[idx]
-    if n >= first_diffuse_index
-        d, n, t = get_hit((n, t), r, unsafe=true)
-        r = FastRay(r.pos + r.dir * d, zero(V3), r.ignore_tri)
-
-        u, v = tex_uv(r.pos, t)
-        if !isnan(u) && !isnan(v) && !isinf(u) && !isinf(v)
-            # it's theoretically possible u, v could come back as zero
-            A = 1024 # equal to image height
-            w, h = size()
-            i = clamp(Int(ceil(u * A)), 1, A)
-            j = clamp(Int(ceil(v * A)), 1, A)
-
-            CUDA.@atomic tex[(i - 1) * A + j, 1] += R
-            CUDA.@atomic tex[(i - 1) * A + j, 2] += G
-            CUDA.@atomic tex[(i - 1) * A + j, 3] += B
-
-        end
-    end
-    nothing
-end
-
-function atomic_light_kernel(rays ::AbstractArray{ADRay}, hits, tris, first_diffuse_index, spectrum, retina, tex )
-    idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-    adr = rays[idx]
-    n = hits[idx]
-    t = tris[idx]
-    if n >= first_diffuse_index
-        for (n_λ, λ) in enumerate(spectrum)
-            r = expand(adr, λ)
-            d, n, t = get_hit((n, t), r, unsafe=true)
-            # NOTE this r breaks convention of dir being zero for retired rays
-            r = FastRay(r.pos + r.dir * d, r.dir, r.ignore_tri)
-            u, v = tex_uv(r.pos, t)
-
-            if !isnan(u) && !isnan(v) && !isinf(u) && !isinf(v)
-                # it's theoretically possible u, v could come back as zero
-                A = 512
-                i = clamp(Int(ceil(v * A)), 1, A)
-                j = clamp(Int(ceil(u * A)), 1, A)
-
-                intensity = texel_scaling(r, t) * cosine_shading(r, t)
-
-                CUDA.@atomic tex[(i - 1) * A + j, 1] += retina[1, 1, n_λ] * intensity
-                CUDA.@atomic tex[(i - 1) * A + j, 2] += retina[1, 2, n_λ] * intensity
-                CUDA.@atomic tex[(i - 1) * A + j, 3] += retina[1, 3, n_λ] * intensity
-
-            end
-        end
-    end
-    nothing
-end
-
 function atomic_spectrum_kernel(rays ::AbstractArray{ADRay}, hits, tris, first_diffuse_index, spectrum, tex)
     idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     adr = rays[idx]
@@ -222,47 +166,12 @@ function atomic_spectrum_kernel(rays ::AbstractArray{ADRay}, hits, tris, first_d
     nothing
 end
 
-function light_map!(RGB3, RGB, tris, hits, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity, dλ, tex)
-
-    for (n_λ, λ) in enumerate(spectrum)
-        expansion .= expand.(rays, λ)
-        hits .= Int32(1)
-        next_hit!(hits, tmp, expansion, n_tris)
-        tri_view = @view tris[hits]
-
-        @assert length(rays) % 256 == 0
-        @assert length(rays) == length(hits) == length(tri_view)
-        @assert eltype(retina_factor) == eltype(RGB3)
-        @info size(RGB3)
-        @cuda blocks=length(rays) ÷ 256 threads=256 atomic_light_kernel(expansion, hits, tri_view, first_diffuse, spectrum, retina_factor[1, :, n_λ]..., RGB3)
-        synchronize()
-
-    end
-
-    RGB .= RGBf.(RGB3[:, 1], RGB3[:, 2], RGB3[:, 3])
-end
-
-function light_map2!(;RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, dλ, tex, kwargs...)
-
-    hit_idx .= Int32(1)
-    next_hit!(hit_idx, tmp, rays, n_tris)
-    tri_view = @view tris[hit_idx]
-
-    @assert length(rays) % 256 == 0
-    @assert length(rays) == length(hit_idx) == length(tri_view)
-    @assert eltype(retina_factor) == eltype(RGB3)
-    @info size(RGB3)
-    @cuda blocks=length(rays) ÷ 256 threads=256 atomic_light_kernel(rays, hit_idx, tri_view, first_diffuse, spectrum, retina_factor, RGB3)
-    synchronize()
-
-    RGB .= RGBf.(RGB3[:, 1], RGB3[:, 2], RGB3[:, 3]) .* dλ
-end
 
 function spectral_light_map!(; tris, hit_idx, tmp, rays, n_tris, spectrum, first_diffuse, dλ, tex, kwargs...)
     hit_idx .= Int32(1)
     next_hit!(hit_idx, tmp, rays, n_tris)
     tri_view = @view tris[hit_idx]
-
+    @info maximum(map(r->norm(r.dir′), rays))
     @assert length(rays) % 256 == 0
     @assert length(rays) == length(hit_idx) == length(tri_view)
 
@@ -272,13 +181,41 @@ function spectral_light_map!(; tris, hit_idx, tmp, rays, n_tris, spectrum, first
 end
 
 
-function continuum_shade2(;RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity=0.1f0, dλ, tex, kwargs...)
+function continuum_shade2(;RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity=1f-2, dλ, tex, kwargs...)
     RGB3 .= 0.0f0
-
+    @info maximum(map(r->norm(r.dir′), rays))
     hit_idx .= Int32(1)
     next_hit!(hit_idx, tmp, rays, n_tris)
     tri_view = @view tris[hit_idx]
     for (n_λ, λ) in enumerate(Array(spectrum))
+        tex_view = @view tex[:, :, n_λ]
+        s(args...) = shade_tex(args..., tex_view)
+        #s(args...) = shade(args...)
+        @info size(retina_factor)
+        @info size(rays)
+        broadcast = @~ s.(rays, hit_idx, tri_view, first_diffuse, spectrum[:, :, n_λ]) .* retina_factor[:, :, n_λ] .* intensity .* dλ
+        # broadcast rule not implemeted for sum!
+        # WARNING this next line is ~90% of pure_sphere runtime at res=1024^2
+        RGB3 .+= sum(broadcast, dims=3) |> a -> reshape(a, length(rays), 3)
+    end
+
+    map!(brightness -> clamp(brightness, 0, 1), RGB3, RGB3)
+    @info maximum(RGB3)
+    RGB .= RGBf.(RGB3[:, 1], RGB3[:, 2], RGB3[:, 3])
+end
+
+
+function expansion_shade2(;RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity=1f-2, dλ, tex, kwargs...)
+    RGB3 .= 0.0f0
+
+    @info maximum(map(r->norm(r.dir′), rays))
+
+    for (n_λ, λ) in enumerate(Array(spectrum))
+        expansion .= expand.(rays, λ)
+        hit_idx .= Int32(1)
+        next_hit!(hit_idx, tmp, expansion, n_tris)
+        tri_view = @view tris[hit_idx]
+
         tex_view = @view tex[:, :, n_λ]
         s(args...) = shade_tex(args..., tex_view)
         #s(args...) = shade(args...)

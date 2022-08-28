@@ -22,13 +22,19 @@ function main()
     θ += 2 * π / 360
 	tris = [
         Sphere(zero(V3), 0.0f0),
-        Sphere(V3(2.5, 3, 0), 1.0f0),
+        #Sphere(V3(2.5, 3, 0), 1.0f0),
+		Sphere(V3(4, 0, 0), 1.0f0),
         Sphere(V3(0, 0, 0), 1.0f0),
     ]
     n_tris = collect(zip(map(Int32, collect(1:length(tris))), tris)) |>
         m -> reshape(m, 1, length(m))
 
-    tex = CUDA.zeros(Float32, 1024, 1024, length(λ_min:dλ:λ_max))
+	x = repeat(vcat(repeat([1.0f0], 16), repeat([0.0f0], 16)), 16) |> CuArray
+	y = reshape(x, 1, length(x)) |> CuArray
+	f(x, y, λ) = (x + y ) % 2
+	Λ = CuArray(collect(λ_min:dλ:λ_max))
+	tex = f.(x, y, reshape(Λ, 1, 1, length(Λ)))
+#    tex = CUDA.ones(Float32, 1024, 1024, length(λ_min:dλ:λ_max))
 
     first_diffuse = 3
 
@@ -51,25 +57,18 @@ function main()
 
     cam = my_moving_camera(1, 1)
 
-	ray_generator(x, y, λ, dv) = simple_light(V3(7, 7, 0), V3(-1/sqrt(2), -1/sqrt(2), 0), V3(1 / sqrt(2), -1/sqrt(2), 0), V3(0, 0, 1), height, width, x, y, λ, dv)
+#	ray_generator(x, y, λ, dv) = simple_light(V3(7, 7, 0), V3(-1/sqrt(2), -1/sqrt(2), 0), V3(1 / sqrt(2), -1/sqrt(2), 0), V3(0, 0, 1), height, width, x, y, λ, dv)
 #	ray_generator(x, y, λ, dv) = simple_light(V3(2, -2, -2), V3(-1, 0, 0), V3(0, 0, 4), V3(0, 4, 0), height, width, x, y, λ)
 
-	rays = wrap_ray_gen(ray_generator; datastructs...)
-    array_kwargs = Dict{Symbol, Any}()
+	#rays = wrap_ray_gen(ray_generator; datastructs...)
 
-    @pack! array_kwargs = tex, tris, n_tris, rays
-	array_kwargs = merge(array_kwargs, datastructs)
 
-    array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
-    run_evolution(;basic_params..., array_kwargs...)
-
-	spectral_light_map!(;basic_params..., array_kwargs...)
 
 	# reverse trace image
-	@unpack RGB3 = array_kwargs
-	RGB3.=0
+
 	ray_generator2(x, y, λ, dv) = camera_ray(cam, height, width, x, y, λ, dv)
 	rays = wrap_ray_gen(ray_generator2; datastructs...)
+	@info eltype(rays)
     array_kwargs = Dict{Symbol, Any}()
 
     @pack! array_kwargs = tex, tris, n_tris, rays

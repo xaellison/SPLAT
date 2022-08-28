@@ -29,11 +29,11 @@ end
 
 function simple_light(center, dir, δ1, δ2, height, width, x, y, λ, dv)
     # returns a rectangular cross-section, unidirectional light source
-    origin = center + δ1 * (x - height ÷ 2) / (height ÷ 2) + δ2 * (y - width ÷ 2) / (width ÷ 2) + dv ./ (width ÷ 2)
+    origin = center + δ1 * (x - height ÷ 2) / (height ÷ 2) + δ2 * (y - width ÷ 2) / (width ÷ 2) + cross(dv, δ1) ./ (height ÷ 2) + cross(dv, δ2) ./ (width ÷ 2)
     return ADRay(origin,
                  zero(V3),
                  dir,
-                 zero(V3),
+                 zero(V3), #V3(0,0,1) * 0.001,
                  false,
                  1,
                  0, # lights are forward tracing, dest not known ahead of time
