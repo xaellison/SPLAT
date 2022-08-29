@@ -1,7 +1,7 @@
 # Linearly encode float32s into uint32 in a way that preserves comparison & equality
-# for all non-NaN values
+# for all normal non-NaN values
 
-@inline function unsafe_encode_parts(f :: Float32) :: Tuple{UInt32, UInt32, UInt32}
+@inline function unsafe_encode_parts(f::Float32)::Tuple{UInt32,UInt32,UInt32}
     if f == 0.0f0
         # greater than any negative, but less than any positive since significand
         # for any non-zero number is 1.x
@@ -17,6 +17,7 @@
         sign = UInt32(1 << 31)
         # https://en.wikipedia.org/wiki/Single-precision_floating-point_format
         # See how exponent is interpretted as exponent - 127
+        # TODO: can handle subnormal nums by identifying when exponent(f) < -127
         exp = (exponent(f) + 127) * 1 << 23 |> UInt32
         sig = (significand(f) - 1) * 1 << 23 |> UInt32
     else
@@ -30,17 +31,17 @@
     return sign, exp, sig
 end
 
-function unsafe_encode(f :: Float32) :: UInt32
-     (sign, exp, sig) = unsafe_encode_parts(f)
-     return sign + exp + sig
+function unsafe_encode(f::Float32)::UInt32
+    (sign, exp, sig) = unsafe_encode_parts(f)
+    return sign + exp + sig
 end
 
-function unsafe_encode(f :: Float32, i :: UInt32) :: UInt64
+function unsafe_encode(f::Float32, i::UInt32)::UInt64
     encoded_f = UInt64(unsafe_encode(f))
     return encoded_f * 1 << 32 + i
 end
 
-function unsafe_decode(i64 :: UInt64) :: UInt32
+function unsafe_decode(i64::UInt64)::UInt32
     return UInt32(i64 % 1 << 32)
 end
 
@@ -53,7 +54,7 @@ function test()
         for (x, e_x) in zip(A, e_A)
             for (y, e_y) in zip(B, e_B)
                 if (x < y) != (e_x < e_y)
-                    @error  "Failed for $x < $y)"
+                    @error "Failed for $x < $y)"
                     return false
                 end
             end
@@ -69,4 +70,6 @@ end
 
 @assert test()
 using BenchmarkTools
-@benchmark unsafe_encode(f) setup=begin f= -rand(Float32) .- 0.5f0 end evals=10 samples=10
+@benchmark unsafe_encode(f) setup = begin
+    f = -rand(Float32) .- 0.5f0
+end evals = 10 samples = 10

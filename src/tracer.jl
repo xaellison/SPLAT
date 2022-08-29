@@ -36,7 +36,11 @@ function get_hit(n_s::Tuple{Int32,Sphere}, r::ADRay; kwargs...)
     return ((d0, ForwardDiff.derivative(d, r.λ)), n, s)
 end
 
-function get_hit(n_t::Tuple{Int32,T}, r::AbstractRay; unsafe=false)::Tuple{Float32,Int32,T} where {T}
+function get_hit(
+    n_t::Tuple{Int32,T},
+    r::AbstractRay;
+    unsafe = false,
+)::Tuple{Float32,Int32,T} where {T}
     # unsafe = true will ignore the in triangle test: useful for continuum_shade
     n, t = n_t
     d = distance_to_plane(r.pos, r.dir, t[2], t[1])
@@ -51,7 +55,7 @@ end
 function get_hit(
     n_t::Tuple{Int32,T},
     r::ADRay;
-    kwargs...
+    kwargs...,
 )::Tuple{Tuple{Float32,Float32},Int32,T} where {T}
     n, t = n_t
     # for n = 1, the degenerate triangle, this will be NaN, which fails d0 > 0 below
@@ -81,11 +85,11 @@ function typemax(::Type{Tuple{Float32,Int32}})
     return (Inf32, one(Int32))
 end
 
-function hit_argmin(n_t, r::ADRay) :: Tuple{Float32, Int32}
+function hit_argmin(n_t, r::ADRay)::Tuple{Float32,Int32}
     return hit_argmin(n_t, FastRay(r))
 end
 
-function hit_argmin(n_t, r::FastRay) :: Tuple{Float32, Int32}
+function hit_argmin(n_t, r::FastRay)::Tuple{Float32,Int32}
     return get_hit(n_t, r)[1:2]
 end
 
@@ -94,7 +98,7 @@ function next_hit!(dest, tmp, rays, n_tris)
     @tullio (min) tmp[i] = hit_argmin(n_tris[j], rays[i])
     d_view = @view dest[:]
     d_view = reshape(d_view, length(d_view))
-    map!(x->x[2], d_view, tmp)
+    map!(x -> x[2], d_view, tmp)
     return
 end
 
@@ -169,8 +173,8 @@ end
 
 ## Wrap it all up
 
-function run_evolution(
-    ;height::Int,
+function run_evolution!(;
+    height::Int,
     width::Int,
     dλ,
     depth,
@@ -182,48 +186,36 @@ function run_evolution(
     hit_idx,
     tmp,
     rndm,
-    kwargs...
+    kwargs...,
 ) where {T}
     intensity = 1.0f0
-    #@info "Stage 1: AD tracing depth = $depth"
-    begin
+    cutoff = length(rays)
 
-        cutoff = length(rays)
+    for iter = 1:depth
+        h_view = @view hit_idx[1:cutoff]
+        r_view = @view rays[1:cutoff]
+        #@info "$(length(r_view)) / $(length(rays)) = $(length(r_view) / length(rays))"
+        tmp_view = @view tmp[1:cutoff]
+        next_hit!(h_view, tmp_view, r_view, n_tris)
+        # evolve rays optically
+        rand!(rndm)
+        tri_view = @view tris[h_view]
+        rand_view = @view rndm[1:cutoff]
+        # everything has to be a view of the same size to avoid allocs + be sort safe
+        r_view .= evolve_ray.(r_view, h_view, tri_view, rand_view, first_diffuse)
 
-        for iter = 1:depth
-            h_view = @view hit_idx[1:cutoff]
-            r_view = @view rays[1:cutoff]
-            #@info "$(length(r_view)) / $(length(rays)) = $(length(r_view) / length(rays))"
-            tmp_view = @view tmp[1:cutoff]
-            next_hit!(h_view, tmp_view, r_view, n_tris)
-            # evolve rays optically
-            rand!(rndm)
-            tri_view = @view tris[h_view]
-            rand_view = @view rndm[1:cutoff]
-            # everything has to be a view of the same size to avoid allocs + be sort safe
-            r_view .= evolve_ray.(r_view, h_view, tri_view, rand_view, first_diffuse)
-
-            # retire appropriate rays
-            if sort_optimization
-                sort!(r_view, by = ray -> ray.status)
-                cutoff = count(ray -> ray.status == RAY_STATUS_ACTIVE, r_view)
-                cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
-            end
-        end
-
+        # retire appropriate rays
         if sort_optimization
-            # restore original order so we can use simple broadcasts to color RGB
-            # TODO: make abstraction so synchronize() works on GPU (if quicksort)
-            sort!(rays, by = r -> r.dest)
+            sort!(r_view, by = ray -> ray.status)
+            cutoff = count(ray -> ray.status == RAY_STATUS_ACTIVE, r_view)
+            cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
         end
     end
 
-    #@info "Stage 2: Expansion (optimization then evaluation)"
-    # NB: we should also expand rays that have been dispersed AND go to infinity - the may have fringe intersections
-    #RGB3 .= 0.0f0
-
-    #expansion_loop_shade(RGB3, RGB, tris, hits, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity, dλ, tex)
-
-    #light_map2!(RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity, dλ, tex)
-    return nothing
+    if sort_optimization
+        # restore original order so we can use simple broadcasts to color RGB
+        # TODO: make abstraction so synchronize() works on GPU (if quicksort)
+        sort!(rays, by = r -> r.dest)
+    end
+    return
 end

@@ -14,39 +14,40 @@ function camera_ray(camera, height, width, x, y, λ, dv)
         dv * 0.25f0 / max(height, width)
     dir = normalize(dir)
     idx = (y - 1) * height + x
+    return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 1, idx, λ, RAY_STATUS_ACTIVE)
+end
+
+function simple_light(center, dir, δ1, δ2, height, width, x, y, λ, dv)
+    # returns a rectangular cross-section, unidirectional light source
+    origin =
+        center +
+        δ1 * (x - height ÷ 2) / (height ÷ 2) +
+        δ2 * (y - width ÷ 2) / (width ÷ 2) +
+        cross(dv, δ1) ./ (height ÷ 2) +
+        cross(dv, δ2) ./ (width ÷ 2)
     return ADRay(
-        camera.pos,
+        origin,
         zero(V3),
         dir,
         zero(V3),
         false,
         1,
-        idx,
+        0, # lights are forward tracing, dest not known ahead of time
         λ,
         RAY_STATUS_ACTIVE,
     )
-end
-
-function simple_light(center, dir, δ1, δ2, height, width, x, y, λ, dv)
-    # returns a rectangular cross-section, unidirectional light source
-    origin = center + δ1 * (x - height ÷ 2) / (height ÷ 2) + δ2 * (y - width ÷ 2) / (width ÷ 2) + cross(dv, δ1) ./ (height ÷ 2) + cross(dv, δ2) ./ (width ÷ 2)
-    return ADRay(origin,
-                 zero(V3),
-                 dir,
-                 zero(V3), #V3(0,0,1) * 0.001,
-                 false,
-                 1,
-                 0, # lights are forward tracing, dest not known ahead of time
-                 λ,
-                 RAY_STATUS_ACTIVE
-                 )
 end
 
 function wrap_ray_gen(ray_generator; rays, row_indices, col_indices, dv, kwargs...)
     height = length(row_indices)
     width = length(col_indices)
     @assert length(rays) == width * height
-    dv .= V3.(CUDA.rand(Float32, height, width), CUDA.rand(Float32, height, width), CUDA.rand(Float32, height, width))
+    dv .=
+        V3.(
+            CUDA.rand(Float32, height, width),
+            CUDA.rand(Float32, height, width),
+            CUDA.rand(Float32, height, width),
+        )
     rays = reshape(rays, height, width)
     rays .= ray_generator.(row_indices, col_indices, 550.0, dv)
     rays = reshape(rays, height * width)

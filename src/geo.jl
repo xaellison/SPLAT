@@ -90,7 +90,7 @@ function get_camera(pos, lookat, true_up, fov)
     # return a camera with normalized direction vectors and all fields populated
     # fov in radians
     dir = normalize(lookat - pos)
-    
+
     right = normalize(cross(dir, true_up))
     up = normalize(cross(right, dir))
 
@@ -115,6 +115,10 @@ end
 
 function optical_normal(t::FTri, pos::V) :: V where V
     optical_normal(STri(t[1], t[2], t[3], t[4], t[5], t[6], t[7]), pos)
+end
+
+function tex_uv(r :: R, t) where {R <: AbstractRay}
+    tex_uv(r.pos, t)
 end
 
 function tex_uv(P, t::Sphere)

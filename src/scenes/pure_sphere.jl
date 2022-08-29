@@ -8,8 +8,8 @@ include("../utils.jl")
 
 function main()
 	# Tracing params
-    width = 2048
-    height = 2048
+    width = 512
+    height = 512
     dλ = 25.0f0
     λ_min = 400.0f0
     λ_max = 700.0f0
@@ -75,9 +75,9 @@ function main()
 	array_kwargs = merge(array_kwargs, datastructs)
 
     array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
-    run_evolution(;basic_params..., array_kwargs...)
+    @time run_evolution!(;basic_params..., array_kwargs...)
 
-	continuum_shade2(;basic_params..., array_kwargs...)
+	@time continuum_shade!(;basic_params..., array_kwargs...)
 
 	# return image
 
