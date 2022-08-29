@@ -72,6 +72,7 @@ Base.zero(::Type{ADRay}) = ADRay(zero(V3), zero(V3), zero(V3), zero(V3), false, 
 translate(t :: Tri, v) = Tri(t[1], t[2] + v, t[3] + v, t[4] + v)
 translate(t :: STri, v) = STri(t[1], t[2] + v, t[3] + v, t[4] + v, t[5], t[6], t[7])
 translate(t :: FTri, v) = FTri(t[1], t[2] + v, t[3] + v, t[4] + v, t[5], t[6], t[7], t[8], t[9], t[10])
+rotate(t :: FTri, R) = FTri(R * t[1], R * t[2], R * t[3], R * t[4], R * t[5], R * t[6], R * t[7], t[8], t[9], t[10])
 
 
 function expand(r :: ADRay, λ :: Float32) :: FastRay

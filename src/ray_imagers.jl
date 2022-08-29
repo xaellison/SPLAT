@@ -133,7 +133,7 @@ function spectral_light_map!(; tris, hit_idx, tmp, rays, n_tris, spectrum, first
 end
 
 
-function continuum_shade!(;RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity=1f-2, dλ, tex, kwargs...)
+function continuum_shade!(;RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity=7f-2, dλ, tex, kwargs...)
     RGB3 .= 0.0f0
     tri_view = @view tris[hit_idx]
     for (n_λ, λ) in enumerate(Array(spectrum))
