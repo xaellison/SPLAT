@@ -42,10 +42,46 @@ function unsafe_encode(f::Float32, i::UInt32)::UInt64
 end
 
 function unsafe_decode(i64::UInt64)::UInt32
+    #TODO rename to retreive or something
     return UInt32(i64 % 1 << 32)
 end
 
-function test()
+function unsafe_decode_parts(i32::UInt32)
+    sign = i32 ÷ (1 << 31)
+    exp = i32 % (1 << 31) ÷ (1 << 23)
+    sig = i32 % (1 << 23)
+    return sign, exp, sig
+end
+
+function unsafe_decode(i32::UInt32) :: Float32
+    u_sign, u_exp, u_sig = unsafe_decode_parts(i32)
+    if (u_sign, u_exp, u_sig) == (1, 0, 0)
+        # special case avoids 0.0f0 -> 5.877472f-39
+        return 0.0f0
+    end
+    if u_sign > 0
+        exp = Int32(u_exp) - 127
+        sig = Float32(u_sig) / (1 << 23) + 1
+        return 2.0f0 ^ exp * sig
+    else
+        exp = 127 - Int32(u_exp)
+        sig = Float32(u_sig) / (1 << 23) - 2
+        return 2.0f0 ^ exp * sig
+    end
+end
+
+
+function test_reversibility()
+    A = vcat([-Inf32, 0.0f0, Inf32], rand(Float32, 100000) .* 16 .- 8)
+    if ! all(unsafe_decode.(unsafe_encode.(A)) .== A)
+        failure = findfirst(i->unsafe_decode(unsafe_encode(A[i]))!=A[i], 1:length(A))
+        @error "Fails for float = $(A[failure])"
+        return false
+    end
+    true
+end
+
+function test_comparison()
     A = vcat([-Inf32, 0.0f0, Inf32], rand(Float32, 100000) .* 16 .- 8)
     B = vcat([-Inf32, 0.0f0, Inf32], rand(Float32, 100000) .* 16 .- 8)
     try
@@ -55,6 +91,31 @@ function test()
             for (y, e_y) in zip(B, e_B)
                 if (x < y) != (e_x < e_y)
                     @error "Failed for $x < $y)"
+                    return false
+                end
+            end
+        end
+    catch E
+        # debug note: output may directly reparse as float64
+        @error E
+        return false
+    end
+
+    return true
+end
+
+
+function test_comparison2()
+    N = 100000
+    A = UInt32.(rand(UInt32, N) .% (1 << 24) .+ rand(UInt32, N) .% (1 << 31))
+    B = UInt32.(rand(UInt32, N) .% (1 << 24) .+ rand(UInt32, N) .% (1 << 31))
+    try
+        e_A = map(unsafe_decode, A)
+        e_B = map(unsafe_decode, B)
+        for (x, e_x) in zip(A, e_A)
+            for (y, e_y) in zip(B, e_B)
+                if (x < y) != (e_x < e_y)
+                    @error "Failed for $x < $y != $e_x < $e_y"
                     return false
                 end
             end
