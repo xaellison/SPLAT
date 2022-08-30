@@ -68,7 +68,6 @@ function test()
     return true
 end
 
-@assert test()
 using BenchmarkTools
 @benchmark unsafe_encode(f) setup = begin
     f = -rand(Float32) .- 0.5f0

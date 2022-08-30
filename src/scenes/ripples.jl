@@ -67,7 +67,7 @@ function main()
     array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
 
     run_evolution!(; basic_params..., array_kwargs...)
-    spectral_light_map!(; basic_params..., array_kwargs...)
+    continuum_light_map!(; basic_params..., array_kwargs...)
 
     # return image
 

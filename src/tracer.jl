@@ -2,6 +2,7 @@ include("material.jl")
 include("ray_generators.jl")
 include("ray_imagers.jl")
 include("rgb_spectrum.jl")
+include("atomic_argmin.jl")
 
 using ForwardDiff
 using Makie
@@ -93,12 +94,56 @@ function hit_argmin(n_t, r::FastRay)::Tuple{Float32,Int32}
     return get_hit(n_t, r)[1:2]
 end
 
+
+function next_hit_kernel(rays, n_tris :: AbstractArray{T}, dest :: AbstractArray{UInt64}, default ) where {T}
+    shmem = @cuDynamicSharedMem(T, blockDim().x)
+    i = threadIdx().x
+    dest_idx = i + (blockIdx().x - 1) * blockDim().x
+    r = rays[dest_idx]
+    cap = 0
+    iter = blockIdx().y - 1
+    arg_min = default
+    min_val = Inf32
+
+    if i + iter * blockDim().x <= length(n_tris)
+        shmem[i] = n_tris[i+iter*blockDim().x]
+    end
+    sync_threads()
+    for scan = 1:min(blockDim().x, length(n_tris) - iter * blockDim().x)
+        n, t = shmem[scan]
+        ####
+
+        d0 = distance_to_plane(r.pos, r.dir, t[2], t[1])
+        p = r.pos + r.dir * d0
+        if in_triangle(p, t[2], t[3], t[4]) && min_val > d0 > 0 && r.ignore_tri != n
+            arg_min = n
+            min_val = d0
+        end
+        ####
+    end
+
+    if dest_idx <= length(rays)
+        operand = unsafe_encode(min_val, UInt32(arg_min))
+        CUDA.@atomic dest[dest_idx] = min(dest[dest_idx], operand)
+    end
+    return nothing
+end
+
+
+
+
 function next_hit!(dest, tmp, rays, n_tris)
-    # TODO: restore tmp as function arg?
-    @tullio (min) tmp[i] = hit_argmin(n_tris[j], rays[i])
-    d_view = @view dest[:]
-    d_view = reshape(d_view, length(d_view))
-    map!(x -> x[2], d_view, tmp)
+
+    my_args = rays, n_tris, tmp, Int32(1)
+
+    kernel = @cuda launch=false next_hit_kernel(my_args...)
+    tmp.=typemax(UInt64)
+    get_shmem(threads) = threads * sizeof(eltype(n_tris))
+    config = launch_configuration(kernel.fun, shmem=threads->get_shmem(threads))
+    threads = config.threads
+    blocks = (cld(length(rays), threads), cld(length(n_tris), threads))
+    kernel(my_args...; blocks=blocks, threads=threads, shmem=get_shmem(threads))
+    dest .= unsafe_decode.(tmp)
     return
 end
 
@@ -190,7 +235,6 @@ function run_evolution!(;
 ) where {T}
     intensity = 1.0f0
     cutoff = length(rays)
-
     for iter = 1:depth
         h_view = @view hit_idx[1:cutoff]
         r_view = @view rays[1:cutoff]
@@ -211,7 +255,6 @@ function run_evolution!(;
             cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
         end
     end
-
     if sort_optimization
         # restore original order so we can use simple broadcasts to color RGB
         # TODO: make abstraction so synchronize() works on GPU (if quicksort)

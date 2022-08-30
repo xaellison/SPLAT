@@ -121,14 +121,55 @@ function atomic_spectrum_kernel(rays ::AbstractArray{ADRay}, hits, tris, first_d
     nothing
 end
 
+
+function atomic_spectrum_kernel(rays ::AbstractArray{FastRay}, hits, tris, first_diffuse_index, spectrum, tex, n_λ)
+    idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    r = rays[idx]
+    n = hits[idx]
+    t = tris[idx]
+    if n >= first_diffuse_index
+        d, n, t = get_hit((n, t), r)
+        # NOTE this r breaks convention of dir being zero for retired rays
+        r = FastRay(r.pos + r.dir * d, r.dir, r.ignore_tri)
+        u, v = tex_uv(r.pos, t)
+
+        if !isnan(u) && !isnan(v) && !isinf(u) && !isinf(v)
+            # it's theoretically possible u, v could come back as zero
+            w, h = size(tex)[1:2]
+            i = clamp(Int(ceil(u * w)), 1, w)
+            j = clamp(Int(ceil(v * h)), 1, h)
+
+            intensity = cosine_shading(r, t)
+            CUDA.@atomic tex[i, j, n_λ] += intensity
+        end
+    end
+    nothing
+end
+
 # the second group is functions that invoke a kernel of a group one function
 
-function spectral_light_map!(; tris, hit_idx, tmp, rays, n_tris, spectrum, first_diffuse, dλ, tex, kwargs...)
+function continuum_light_map!(; tris, hit_idx, tmp, rays, n_tris, spectrum, first_diffuse, dλ, tex, kwargs...)
     tri_view = @view tris[hit_idx]
     @assert length(rays) % 256 == 0
     @assert length(rays) == length(hit_idx) == length(tri_view)
 
     @cuda blocks=length(rays) ÷ 256 threads=256 atomic_spectrum_kernel(rays, hit_idx, tri_view, first_diffuse, spectrum, tex)
+    synchronize()
+end
+
+function expansion_light_map!(; tris, hit_idx, tmp, rays, expansion, n_tris, spectrum, first_diffuse, dλ, tex, kwargs...)
+    for (n_λ, λ) in enumerate(Array(spectrum))
+        expansion .= expand.(rays, λ)
+        hit_idx .= Int32(1)
+        next_hit!(hit_idx, tmp, expansion, n_tris)
+        tri_view = @view tris[hit_idx]
+
+
+        @assert length(rays) % 256 == 0
+        @assert length(rays) == length(hit_idx) == length(tri_view)
+
+        @cuda blocks=length(rays) ÷ 256 threads=256 atomic_spectrum_kernel(expansion, hit_idx, tri_view, first_diffuse, spectrum, tex, n_λ)
+    end
     synchronize()
 end
 
@@ -152,7 +193,7 @@ function continuum_shade!(;RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum
 end
 
 
-function expansion_shade!(;RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity=1f-2, dλ, tex, kwargs...)
+function expansion_shade!(;RGB3, RGB, tris, hit_idx, tmp, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity=7f-2, dλ, tex, kwargs...)
     RGB3 .= 0.0f0
     for (n_λ, λ) in enumerate(Array(spectrum))
         expansion .= expand.(rays, λ)

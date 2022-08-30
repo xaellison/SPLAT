@@ -8,15 +8,15 @@ include("../utils.jl")
 include("../procedural_assets.jl")
 
 function main()
-	for frame in shuffle(collect(1:180))
-	R = rotation_matrix(V3(0, 0, 1), 2 * pi * frame / 180)
+	for frame in (collect(1:1))
+	R = rotation_matrix(V3(0, 0, 1), 2 * pi * (frame - 20) / 180)
 	# Tracing params
     width = 1024
     height = 1024
     dλ = 6.25f0
     λ_min = 400.0f0
     λ_max = 700.0f0
-    depth = 3
+    depth = 5
     ITERS = 1
     sort_optimization = false
 
@@ -58,7 +58,7 @@ function main()
     array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
     CUDA.@time run_evolution!(;basic_params..., array_kwargs...)
 
-	CUDA.@time spectral_light_map!(;basic_params..., array_kwargs...)
+	CUDA.@time continuum_light_map!(;basic_params..., array_kwargs...)
 
 
 	# reverse trace image

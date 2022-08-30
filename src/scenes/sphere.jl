@@ -61,7 +61,7 @@ function main()
     array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
     CUDA.@time run_evolution!(;basic_params..., array_kwargs...)
 
-	CUDA.@time spectral_light_map!(;basic_params..., array_kwargs...)
+	CUDA.@time expansion_light_map!(;basic_params..., array_kwargs...)
 
 	# reverse trace image
 	@unpack RGB3 = array_kwargs
@@ -77,7 +77,7 @@ function main()
     (;basic_params..., array_kwargs...)
 
 	CUDA.@time run_evolution!(;basic_params..., array_kwargs...)
-	CUDA.@time continuum_shade!(;basic_params..., array_kwargs...)
+	CUDA.@time expansion_shade!(;basic_params..., array_kwargs...)
 
 	# return image
 
