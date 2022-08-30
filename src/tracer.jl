@@ -139,6 +139,7 @@ function next_hit!(dest, tmp, rays, n_tris)
     kernel = @cuda launch=false next_hit_kernel(my_args...)
     tmp.=typemax(UInt64)
     get_shmem(threads) = threads * sizeof(eltype(n_tris))
+    # TODO: this is running <= 50% occupancy. Need to put a cap on shmem smaller than block
     config = launch_configuration(kernel.fun, shmem=threads->get_shmem(threads))
     threads = config.threads
     blocks = (cld(length(rays), threads), cld(length(n_tris), threads))
