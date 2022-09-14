@@ -44,9 +44,9 @@ function get_hit(
 )::Tuple{Float32,Int32,AbstractTri} where {AbstractTri}
     # unsafe = true will ignore the in triangle test: useful for continuum_shade
     i, T = i_T
-    t = distance_to_plane(r.pos, r.dir, T[2], T[1])
+    t = distance_to_plane(r, T)
     p = r.pos + r.dir * t
-    if (unsafe || in_triangle(p, T[2], T[3], T[4])) && t > 0 && r.ignore_tri != i
+    if (unsafe || in_triangle(p, T)) && t > 0 && r.ignore_tri != i
         return (t, i, T) # formerly d, n, t
     else
         return (Inf32, one(Int32), T)
@@ -61,15 +61,10 @@ function get_hit(
     i, T = i_T
     # In the case of i = 1, the degenerate triangle, this will be NaN.
     # t0 = NaN fails d0 > 0 below, which properly gives us i = 1 back
-    t0 = distance_to_plane(r.pos, r.dir, T[2], T[1])
-    t(λ) = distance_to_plane(
-        r.pos + r.pos′ * (λ - r.λ),
-        r.dir + r.dir′ * (λ - r.λ),
-        T[2],
-        T[1],
-    )
+    t0 = distance_to_plane(r, T)
+    t(λ) = distance_to_plane(r, T, λ)
     p = r.pos + r.dir * t0
-    if in_triangle(p, T[2], T[3], T[4]) && t0 > 0 && r.ignore_tri != i
+    if in_triangle(p, T) && t0 > 0 && r.ignore_tri != i
         return ((t0, ForwardDiff.derivative(t, r.λ)), i, T)
     else
         return ((Inf32, Inf32), one(Int32), T)
@@ -96,32 +91,28 @@ function hit_argmin(i_T, r::FastRay)::Tuple{Float32,Int32}
 end
 
 
-function next_hit_kernel(rays, n_tris :: AbstractArray{T}, dest :: AbstractArray{UInt64}, default ) where {T}
+function next_hit_kernel(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray{UInt64}, default ) where {X}
     # TODO: rename everything
-    shmem = @cuDynamicSharedMem(T, blockDim().x)
-    i = threadIdx().x
-    dest_idx = i + (blockIdx().x - 1) * blockDim().x
+    shmem = @cuDynamicSharedMem(X, blockDim().x)
+
+    dest_idx = threadIdx().x + (blockIdx().x - 1) * blockDim().x
     r = rays[dest_idx]
-    cap = 0
-    iter = blockIdx().y - 1
+
     arg_min = default
     min_val = Inf32
 
-    if i + iter * blockDim().x <= length(n_tris)
-        shmem[i] = n_tris[i+iter*blockDim().x]
+    if threadIdx().x + (blockIdx().y - 1) * blockDim().x <= length(n_tris)
+        shmem[threadIdx().x] = n_tris[threadIdx().x + (blockIdx().y - 1) * blockDim().x]
     end
     sync_threads()
-    for scan = 1:min(blockDim().x, length(n_tris) - iter * blockDim().x)
-        n, t = shmem[scan]
-        ####
-
-        d0 = distance_to_plane(r.pos, r.dir, t[2], t[1])
-        p = r.pos + r.dir * d0
-        if in_triangle(p, t[2], t[3], t[4]) && min_val > d0 > 0 && r.ignore_tri != n
-            arg_min = n
-            min_val = d0
+    for scan = 1:min(blockDim().x, length(n_tris) - (blockIdx().y - 1) * blockDim().x)
+        i, T = shmem[scan]
+        t = distance_to_plane(r, T)
+        p = r.pos + r.dir * t
+        if in_triangle(p, T) && min_val > t > 0 && r.ignore_tri != i
+            arg_min = i
+            min_val = t
         end
-        ####
     end
 
     if dest_idx <= length(rays)
@@ -158,7 +149,6 @@ function next_hit!(dest, tmp, rays, n_tris::AbstractArray{Tuple{N, Sphere}}) whe
     map!(x -> x[2], d_view, tmp)
 end
 
-#"""
 ## Ray evolvers
 
 

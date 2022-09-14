@@ -395,6 +395,19 @@ end
     dist = (dot(normal, plane_point) - dot(normal, origin)) / dot(normal, dir)
 end
 
+function distance_to_plane(r, T)
+    return distance_to_plane(r.pos, r.dir, T[2], T[1])
+end
+
+function distance_to_plane(r, T, λ)
+    distance_to_plane(
+        r.pos + r.pos′ * (λ - r.λ),
+        r.dir + r.dir′ * (λ - r.λ),
+        T[2],
+        T[1],
+    )
+end
+
 function same_side(p1, p2, _a, _b)
     # if t >= 0 then p1 and p2 are on the same side of segment a b
     cp1 = cross(_b - _a, p1 - _a)
@@ -413,6 +426,10 @@ function in_triangle(p, a, b, c)
         return false
     end
     return true
+end
+
+function in_triangle(p, T)
+    return in_triangle(p, T[2], T[3], T[4])
 end
 
 function vector_cosine(a::ℜ³, b::ℜ³)::Float32
