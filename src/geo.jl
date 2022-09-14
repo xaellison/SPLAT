@@ -10,12 +10,10 @@ import Base: rand, typemax, isless, one, zero
 
 
 const ℜ³ = SVector{3,Float32}
-const INVALID_ℜ³ = SVector(Inf, Inf, Inf)
 const _COS_45 = 1 / sqrt(2)
 
 # element 1 is normal
 const Tri = SVector{4,ℜ³}
-
 const STri = SVector{7,ℜ³}
 const FTri = SVector{10, ℜ³}
 
@@ -245,71 +243,6 @@ function mesh_to_FTri(mesh)::Array{FTri}
     out
 end
 
-function parse_obj(path)::AbstractArray{STri}
-    vertices = []
-    normals = []
-    faces = []
-    face_normals = []
-    s = open(path) do file
-        for line in readlines(file)
-            words = split(line)
-            if length(words) >= 4
-                if words[1] == "v"
-                    x, y, z = map(x -> parse(Float32, x), words[2:4])
-                    vertex = ℜ³(x, y, z)
-                    push!(vertices, vertex)
-                elseif words[1] == "f"
-                    dests = Dict(1 => faces, 3 => face_normals)
-                    for i in (1, 3)
-                        integers = map(
-                            x -> parse(Int32, split(x, "/")[i]),
-                            words[2:length(words)],
-                        )
-                        naturals::Array{Int32} =
-                            map(x -> x < 0 ? length(vertices) - x : x, integers)
-                        face = Array{Int32,1}(naturals)
-                        process_face(face, dests[i])
-                    end
-                elseif words[1] == "vn"
-                    x, y, z = map(x -> parse(Float32, x), words[2:4])
-                    normal = ℜ³(x, y, z)
-                    push!(normals, normal)
-                end
-            end
-        end
-    end
-    # we require triangulated models
-    @test all(map(length, faces)[i] == 3 for i = 1:length(faces))
-    # Normal indices may not align with vertices'
-    final_normals = Array{ℜ³,1}(undef, length(normals))
-    for (face_vertices, face_normals) in zip(faces, face_normals)
-        for i = 1:3
-            dest_index = face_vertices[i]
-            src_index = face_normals[i]
-            final_normals[dest_index] = normals[src_index]
-        end
-    end
-
-    #plane_normals = compute_normals(vertices, faces)
-    out = []
-    for f in faces
-        a, b, c = vertices[f[1]], vertices[f[2]], vertices[f[3]]
-        q, r, s = final_normals[f[1]], final_normals[f[2]], final_normals[f[3]]
-        push!(
-            out,
-            STri(
-                cross(a - b, b - c),
-                a,
-                b,
-                c,
-                cross(a - b, b - c),
-                cross(a - b, b - c),
-                cross(a - b, b - c),
-            ),
-        )
-    end
-    return out
-end
 
 function model_box(vertices)
     min_x = minimum(v[1] for v in vertices)
@@ -465,12 +398,6 @@ function reflectance(v, normal, n1, n2)
 end
 
 function reflectance_s(v::ℜ³, normal::ℜ³, n1, n2)
-    # https://en.wikipedia.org/wiki/Schlick%27s_approximation
-    # fascinatingly, schlick gives non-zero reflectance if the media have same n
-    # so we resort to using one of the fresnel's arbitrarily
-    #https://en.wikipedia.org/wiki/Fresnel_equations
-    # Additionally, we use the average of s and p polarizations
-    # https://en.wikipedia.org/wiki/Schlick%27s_approximation
     n = normalize(normal)
     if dot(n, v) < 0
         n = n * -1
@@ -483,12 +410,6 @@ function reflectance_s(v::ℜ³, normal::ℜ³, n1, n2)
 end
 
 function reflectance_p(v::ℜ³, normal::ℜ³, n1, n2)
-    # https://en.wikipedia.org/wiki/Schlick%27s_approximation
-    # fascinatingly, schlick gives non-zero reflectance if the media have same n
-    # so we resort to using one of the fresnel's arbitrarily
-    #https://en.wikipedia.org/wiki/Fresnel_equations
-    # Additionally, we use the average of s and p polarizations
-    # https://en.wikipedia.org/wiki/Schlick%27s_approximation
     n = normalize(normal)
     if dot(n, v) < 0
         n = n * -1
