@@ -31,6 +31,19 @@ struct Cam
     FOV_half_sin::Float32
 end
 
+struct RenderScene{T}
+    elements :: AbstractArray{T}
+    first_diffuse
+end
+
+RenderScene{T}(transparent_elements :: AbstractArray{T},
+               diffuse_elements :: AbstractArray{T}) where T = begin
+    meshes = [[zero(T)], transparent_elements, diffuse_elements]
+	first_diffuse = 1 + length(transparent_elements) + 1
+	elements = foldl(vcat, meshes)
+	return RenderScene{T}(elements, first_diffuse)
+end
+
 abstract type AbstractRay end
 
 struct ADRay <: AbstractRay

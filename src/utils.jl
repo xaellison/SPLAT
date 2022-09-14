@@ -26,8 +26,8 @@ function scene_datastructs(A; width, height, dλ, λ_min, λ_max, depth, kwargs.
     # Datastruct init
     expansion = A{FastRay}(undef, (length(rays)))
     # for Sphere geometry:
-    # tmp = A{Tuple{Float32, Int32}}(undef, size(expansion))
-    tmp = A{UInt64}(undef, size(expansion))
+    tmp = A{Tuple{Float32, Int32}}(undef, size(expansion))
+    #tmp = A{UInt64}(undef, size(expansion))
     rndm = rand(Float32, height * width)
     out = Dict{Symbol,Any}()
     @pack! out = RGB,
