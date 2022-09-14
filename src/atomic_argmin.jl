@@ -70,9 +70,16 @@ function unsafe_decode(i32::UInt32) :: Float32
     end
 end
 
+function test_array()
+    # numbers that we definitely want in the test
+    special_numbers = [-Inf32, 0.0f0, Inf32]
+    A = foldl(vcat, rand(Float32, 1000) * (2.0f0 ^ i) .* 2 .- 1 for i in -100:5:100)
+    A = vcat(A, special_numbers)
+    A
+end
 
 function test_reversibility()
-    A = vcat([-Inf32, 0.0f0, Inf32], rand(Float32, 100000) .* 16 .- 8)
+    A = test_array()
     if ! all(unsafe_decode.(unsafe_encode.(A)) .== A)
         failure = findfirst(i->unsafe_decode(unsafe_encode(A[i]))!=A[i], 1:length(A))
         @error "Fails for float = $(A[failure])"
@@ -82,8 +89,8 @@ function test_reversibility()
 end
 
 function test_comparison()
-    A = vcat([-Inf32, 0.0f0, Inf32], rand(Float32, 100000) .* 16 .- 8)
-    B = vcat([-Inf32, 0.0f0, Inf32], rand(Float32, 100000) .* 16 .- 8)
+    A = test_array()
+    B = test_array()
     try
         e_A = map(unsafe_encode, A)
         e_B = map(unsafe_encode, B)

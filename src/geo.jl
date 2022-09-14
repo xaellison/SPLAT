@@ -415,32 +415,6 @@ function in_triangle(p, a, b, c)
     return true
 end
 
-function in_triangle(temp_hit, geometry, tri_id)
-    f = geometry.faces[tri_id]
-    a = geometry.vertices[f[1]]
-    b = geometry.vertices[f[2]]
-    c = geometry.vertices[f[3]]
-    return in_triangle(temp_hit.hit, a, b, c)
-end
-
-function intersection(ray, geometry, tri_id)::Hit
-    pos, dir = ray
-    a = geometry.vertices[geometry.faces[tri_id]][1]
-    normal = geometry.normals[tri_id]
-    dist = distance_to_plane(pos, normalize(dir), a, normal)
-    p = pos + normalize(dir) * dist
-
-    f = geometry.faces[tri_id]
-    a = geometry.vertices[f[1]]
-    b = geometry.vertices[f[2]]
-    c = geometry.vertices[f[3]]
-    if in_triangle(p, a, b, c)
-        return Hit(p, dist, tri_id)
-    else
-        return Hit(p, -1, -1)
-    end
-end
-
 function vector_cosine(a::V3, b::V3)::Float32
     return dot(a, b) / (norm(a) * norm(b))
 end
