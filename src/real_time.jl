@@ -22,8 +22,10 @@ fig, ax, hm = image(x, y, matrix)
 # Just don't forget to call `display(fig)` before the loop
 # and without record, one needs to insert a yield to yield to the render task
 display(fig)
-for i in 1:N
-    hm[3] = mandelbrot.(x, y') # update data
+while true
+    events(hm).mouseposition |> println
 
-     yield()
+    hm[3] = mandelbrot.(x, y') # update data
+    sleep(0.05)
+    yield()
 end
