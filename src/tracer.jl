@@ -148,6 +148,14 @@ function next_hit!(dest, tmp, rays, n_tris)
     return
 end
 
+function next_hit!(dest, tmp, rays, n_tris::AbstractArray{Tuple{N, Sphere}}) where N
+    # TODO: restore tmp as function arg?
+    @tullio (min) tmp[i] = hit_argmin(n_tris[j], rays[i])
+    d_view = @view dest[:]
+    d_view = reshape(d_view, length(d_view))
+    map!(x -> x[2], d_view, tmp)
+end
+
 #"""
 ## Ray evolvers
 

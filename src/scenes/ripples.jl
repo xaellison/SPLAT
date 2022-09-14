@@ -21,10 +21,10 @@ function main()
     # Geometry
     rips = ripples()
     sq = square()
-    map!(t -> translate(t, V3(-0.5, -0.5, 0)), rips, rips)
+    map!(t -> translate(t, ℜ³(-0.5, -0.5, 0)), rips, rips)
 
     @info model_box(rips)
-    map!(t -> translate(t, V3(-0.5, -0.5 - 0.5, -3)), sq, sq)
+    map!(t -> translate(t, ℜ³(-0.5, -0.5 - 0.5, -3)), sq, sq)
 
     meshes = [[zero(FTri)], rips, sq]
 
@@ -47,10 +47,10 @@ function main()
     # Forward Trace light map
 
     ray_generator(x, y, λ, dv) = simple_light(
-        V3(0, 0, 5),
-        V3(0, -0.25, -1),
-        V3(1, 0, 0),
-        V3(0, 1, 0),
+        ℜ³(0, 0, 5),
+        ℜ³(0, -0.25, -1),
+        ℜ³(1, 0, 0),
+        ℜ³(0, 1, 0),
         height,
         width,
         x,

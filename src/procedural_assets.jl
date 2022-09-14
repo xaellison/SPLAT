@@ -1,13 +1,13 @@
 function stage()
     z_floor = -2
-    a = V3(3, 1, z_floor)
-    b = V3(-3, 1, z_floor)
-    c = V3(0, -2, z_floor)
-    d = V3(0, -2, 2)
-    t_a = V3(0, 0, 0)
-    t_b = V3(1, 0, 0)
-    t_c = V3(0.5, 0.5, 0)
-    t_d = V3(0.5, 1, 0)
+    a = ℜ³(3, 1, z_floor)
+    b = ℜ³(-3, 1, z_floor)
+    c = ℜ³(0, -2, z_floor)
+    d = ℜ³(0, -2, 2)
+    t_a = ℜ³(0, 0, 0)
+    t_b = ℜ³(1, 0, 0)
+    t_c = ℜ³(0.5, 0.5, 0)
+    t_d = ℜ³(0.5, 1, 0)
     n1 = normalize(cross(a - b, a - c))
     T1 = FTri(n1, a, b, c, n1, n1, n1, t_a, t_b, t_c)
     n2 = normalize(cross(d - b, d - c))
@@ -23,9 +23,9 @@ function ripples()
     δx = 0.025
     δy = 0.025
     f(x, y) = (sin(30 * x) + sin(40 * y + 10 * x)) * 0.0025
-    V(x, y) = V3(x, y, f(x, y))
+    V(x, y) = ℜ³(x, y, f(x, y))
     # https://mathworld.wolfram.com/NormalVector.html
-    N(x, y) = V3(
+    N(x, y) = ℜ³(
         ForwardDiff.derivative(x -> f(x, y), x),
         ForwardDiff.derivative(y -> f(x, y), y),
         -1,
@@ -46,9 +46,9 @@ function ripples()
             n_a = N(x, y)
             n_b = N(x + δx, y)
             n_c = N(x, y + δy)
-            t_a = V3(a[1:2]..., 0)
-            t_b = V3(b[1:2]..., 0)
-            t_c = V3(c[1:2]..., 0)
+            t_a = ℜ³(a[1:2]..., 0)
+            t_b = ℜ³(b[1:2]..., 0)
+            t_c = ℜ³(c[1:2]..., 0)
             FTri(n, a, b, c, n_a, n_b, n_c, t_a, t_b, t_c)
         end
     tri2(x, y) =
@@ -60,9 +60,9 @@ function ripples()
             n_a = N(x + δx, y + δy)
             n_b = N(x + δx, y)
             n_c = N(x, y + δy)
-            t_a = V3(a[1:2]..., 0)
-            t_b = V3(b[1:2]..., 0)
-            t_c = V3(c[1:2]..., 0)
+            t_a = ℜ³(a[1:2]..., 0)
+            t_b = ℜ³(b[1:2]..., 0)
+            t_c = ℜ³(c[1:2]..., 0)
             FTri(n, a, b, c, n_a, n_b, n_c, t_a, t_b, t_c)
         end
     out = vcat(tri1.(x, y), tri2.(x, y))
@@ -71,11 +71,11 @@ end
 
 
 function square()
-    a = V3(0, 0, 0)
-    b = V3(1, 0, 0)
-    c = V3(0, 1, 0)
-    d = V3(1, 1, 0)
-    n = V3(0, 0, 1)
+    a = ℜ³(0, 0, 0)
+    b = ℜ³(1, 0, 0)
+    c = ℜ³(0, 1, 0)
+    d = ℜ³(1, 1, 0)
+    n = ℜ³(0, 0, 1)
     return [FTri(n, a, b, c, n, n, n, a, b, c), FTri(n, b, c, d, n, n, n, b, c, d)]
 end
 

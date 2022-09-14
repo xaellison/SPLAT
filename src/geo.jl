@@ -9,37 +9,37 @@ using Test
 import Base: rand, typemax, isless, one, zero
 
 
-const V3 = SVector{3,Float32}
-const INVALID_V3 = SVector(Inf, Inf, Inf)
+const ℜ³ = SVector{3,Float32}
+const INVALID_ℜ³ = SVector(Inf, Inf, Inf)
 const _COS_45 = 1 / sqrt(2)
 
 # element 1 is normal
-const Tri = SVector{4,V3}
+const Tri = SVector{4,ℜ³}
 
-const STri = SVector{7,V3}
-const FTri = SVector{10, V3}
+const STri = SVector{7,ℜ³}
+const FTri = SVector{10, ℜ³}
 
 struct Sphere
-    origin :: V3
+    origin :: ℜ³
     radius :: Float32
 end
 
 struct Cam
-    pos::V3
-    look_at::V3
-    dir::V3
-    up::V3
-    right::V3
+    pos::ℜ³
+    look_at::ℜ³
+    dir::ℜ³
+    up::ℜ³
+    right::ℜ³
     FOV_half_sin::Float32
 end
 
 abstract type AbstractRay end
 
 struct ADRay <: AbstractRay
-    pos::V3
-    pos′::V3
-    dir::V3
-    dir′::V3
+    pos::ℜ³
+    pos′::ℜ³
+    dir::ℜ³
+    dir′::ℜ³
     in_medium::Bool
     ignore_tri::Int
     dest::Int
@@ -57,17 +57,17 @@ function retire(ray::ADRay, status)
 end
 
 struct FastRay <: AbstractRay
-    pos::V3
-    dir::V3
+    pos::ℜ³
+    dir::ℜ³
     ignore_tri::Int
 end
 
 FastRay(adray :: ADRay) = FastRay(adray.pos, adray.dir, adray.ignore_tri)
 
-Base.zero(::V3) = V3(0.0f0, 0.0f0, 0.0f0)
+Base.zero(::ℜ³) = ℜ³(0.0f0, 0.0f0, 0.0f0)
 
-Base.zero(::Type{FastRay}) = FastRay(zero(V3), zero(V3), 1)
-Base.zero(::Type{ADRay}) = ADRay(zero(V3), zero(V3), zero(V3), zero(V3), false, 1, -1, 0.0f0, zero(UInt8))
+Base.zero(::Type{FastRay}) = FastRay(zero(ℜ³), zero(ℜ³), 1)
+Base.zero(::Type{ADRay}) = ADRay(zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), false, 1, -1, 0.0f0, zero(UInt8))
 
 translate(t :: Tri, v) = Tri(t[1], t[2] + v, t[3] + v, t[4] + v)
 translate(t :: STri, v) = STri(t[1], t[2] + v, t[3] + v, t[4] + v, t[5], t[6], t[7])
@@ -83,8 +83,8 @@ function expand(r :: ADRay, λ :: Float32) :: FastRay
     )
 end
 
-function rand(::V3)
-    return V3((rand(Float32, 3) .- 0.5) .* 2...)
+function rand(::ℜ³)
+    return ℜ³((rand(Float32, 3) .- 0.5) .* 2...)
 end
 
 function get_camera(pos, lookat, true_up, fov)
@@ -164,9 +164,9 @@ function reverse_uv(P, t)
     return u, v
 end
 
-function reverse_uv(pos::V3, s::Sphere) #:: Pair{Float32, Float32}
+function reverse_uv(pos::ℜ³, s::Sphere) #:: Pair{Float32, Float32}
     # lazy test like: min/max [1]/[2]
-    # maximum(reverse_uv(rand(V3), Sphere(V3(0.5,0.5,0.5), 1))[1] for i in 1:10000)
+    # maximum(reverse_uv(rand(ℜ³), Sphere(ℜ³(0.5,0.5,0.5), 1))[1] for i in 1:10000)
     x, y, z = normalize(pos - s.origin)
     ϕ = atan(sqrt(x^2 + y^2), z)
     θ = atan(y, x)
@@ -216,32 +216,32 @@ function mesh_to_Tri(mesh)::Array{Tri}
     for face in mesh
         process_face(face, out)
     end
-    prepend!(out, [Tri(zero(V3), zero(V3), zero(V3), zero(V3))])
+    prepend!(out, [Tri(zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³))])
     out
 end
 
 function mesh_to_STri(mesh)::Array{STri}
     out = []
     for face in mesh
-        (v1, v2, v3) = map(p -> V3(p.position), face.points)
-        (n1, n2, n3) = map(p -> V3(p.normals), face.points)
+        (v1, v2, v3) = map(p -> ℜ³(p.position), face.points)
+        (n1, n2, n3) = map(p -> ℜ³(p.normals), face.points)
         push!(out, STri(cross(v1 - v2, v2 - v3), v1, v2, v3, n1, n2, n3))
     end
     # prepend degenerate triangle which will alway fail hit tests
-    prepend!(out, [STri(zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3))])
+    prepend!(out, [STri(zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³))])
     out
 end
 
 function mesh_to_FTri(mesh)::Array{FTri}
     out = []
     for face in mesh
-        (v1, v2, v3) = map(p -> V3(p.position), face.points)
-        (n1, n2, n3) = map(p -> V3(p.normals), face.points)
-        (t1, t2, t3) = map(p -> V3(p.uv..., 0), face.points)
+        (v1, v2, v3) = map(p -> ℜ³(p.position), face.points)
+        (n1, n2, n3) = map(p -> ℜ³(p.normals), face.points)
+        (t1, t2, t3) = map(p -> ℜ³(p.uv..., 0), face.points)
         push!(out, FTri(cross(v1 - v2, v2 - v3), v1, v2, v3, n1, n2, n3, t1, t2, t3))
     end
     # prepend degenerate triangle which will alway fail hit tests
-    prepend!(out, [FTri(zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3), zero(V3))])
+    prepend!(out, [FTri(zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³))])
     out
 end
 
@@ -256,7 +256,7 @@ function parse_obj(path)::AbstractArray{STri}
             if length(words) >= 4
                 if words[1] == "v"
                     x, y, z = map(x -> parse(Float32, x), words[2:4])
-                    vertex = V3(x, y, z)
+                    vertex = ℜ³(x, y, z)
                     push!(vertices, vertex)
                 elseif words[1] == "f"
                     dests = Dict(1 => faces, 3 => face_normals)
@@ -272,7 +272,7 @@ function parse_obj(path)::AbstractArray{STri}
                     end
                 elseif words[1] == "vn"
                     x, y, z = map(x -> parse(Float32, x), words[2:4])
-                    normal = V3(x, y, z)
+                    normal = ℜ³(x, y, z)
                     push!(normals, normal)
                 end
             end
@@ -281,7 +281,7 @@ function parse_obj(path)::AbstractArray{STri}
     # we require triangulated models
     @test all(map(length, faces)[i] == 3 for i = 1:length(faces))
     # Normal indices may not align with vertices'
-    final_normals = Array{V3,1}(undef, length(normals))
+    final_normals = Array{ℜ³,1}(undef, length(normals))
     for (face_vertices, face_normals) in zip(faces, face_normals)
         for i = 1:3
             dest_index = face_vertices[i]
@@ -331,15 +331,15 @@ function model_box(tris::Array{T}) where {T <: Union{Tri, STri, FTri}}
     return (min_x, max_x, min_y, max_y, min_z, max_z)
 end
 
-function _centroid(tris)::V3
+function _centroid(tris)::ℜ³
     avg(i) = sum(sum(v[i] for v in t[2:4]) for t in tris) / (3 * length(tris))
-    return V3(map(avg, [1,2,3])...)
+    return ℜ³(map(avg, [1,2,3])...)
 end
 
-function centroidish(tris) :: V3
+function centroidish(tris) :: ℜ³
     v = model_box(tris)
-    lo = V3(v[1:2:end]...)
-    hi = V3(v[2:2:end]...)
+    lo = ℜ³(v[1:2:end]...)
+    hi = ℜ³(v[2:2:end]...)
     return (lo + hi) .* 0.5f0
 end
 
@@ -415,11 +415,11 @@ function in_triangle(p, a, b, c)
     return true
 end
 
-function vector_cosine(a::V3, b::V3)::Float32
+function vector_cosine(a::ℜ³, b::ℜ³)::Float32
     return dot(a, b) / (norm(a) * norm(b))
 end
 
-function project(a::V3, b::V3)::V3
+function project(a::ℜ³, b::ℜ³)::ℜ³
     # this is the result of projecting a onto b
     return b * (dot(a, b) / (norm(b)))
 end
@@ -447,7 +447,7 @@ function reflectance(v, normal, n1, n2)
     return (((n1 + n2) / 2 * c1 - (n1 + n2) / 2 * s2) / (n1 * c1 + n2 * s2))^2
 end
 
-function reflectance_s(v::V3, normal::V3, n1, n2)
+function reflectance_s(v::ℜ³, normal::ℜ³, n1, n2)
     # https://en.wikipedia.org/wiki/Schlick%27s_approximation
     # fascinatingly, schlick gives non-zero reflectance if the media have same n
     # so we resort to using one of the fresnel's arbitrarily
@@ -465,7 +465,7 @@ function reflectance_s(v::V3, normal::V3, n1, n2)
     return ((n1 * c1 - n2 * s2) / (n1 * c1 + n2 * s2))^2
 end
 
-function reflectance_p(v::V3, normal::V3, n1, n2)
+function reflectance_p(v::ℜ³, normal::ℜ³, n1, n2)
     # https://en.wikipedia.org/wiki/Schlick%27s_approximation
     # fascinatingly, schlick gives non-zero reflectance if the media have same n
     # so we resort to using one of the fresnel's arbitrarily

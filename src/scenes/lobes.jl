@@ -8,8 +8,8 @@ include("../utils.jl")
 include("../procedural_assets.jl")
 
 function main()
-	for frame in (collect(1:1))
-	R = rotation_matrix(V3(0, 0, 1), 2 * pi * (frame - 20) / 180)
+	for frame in (collect(1:180))
+	R = rotation_matrix(ℜ³(0, 0, 1), 2 * pi * (frame - 20) / 180)
 	# Tracing params
     width = 1024
     height = 1024
@@ -24,9 +24,9 @@ function main()
 
 	lobe1 = mesh_to_FTri(load("objs/lobe1_1.obj"))
 	lobe2 = mesh_to_FTri(load("objs/lobe2_1.obj"))
-	lobe1 = map(t -> translate(t, V3(0, 0, -0.25) ), lobe1)
+	lobe1 = map(t -> translate(t, ℜ³(0, 0, -0.25) ), lobe1)
 	lobe1 = map(t -> rotate(t, R), lobe1)
-	lobe2 = map(t -> translate(t, V3(0, 0, -0.25) ), lobe2)
+	lobe2 = map(t -> translate(t, ℜ³(0, 0, -0.25) ), lobe2)
 	lobe2 = map(t -> rotate(t, R), lobe2)
 	meshes = [[zero(FTri)], lobe1, lobe2]
 	first_diffuse = 1 + length(lobe1) + 1
@@ -46,8 +46,8 @@ function main()
 	# Forward Trace light map
 
 
-	#ray_generator(x, y, λ, dv) = simple_light(V3(0, 1, 0), V3(0, -1, 0), V3(0, 0, 1) * 0.3, V3(1, 0, 0) * 0.3, height, width, x, y, λ, dv)
-	ray_generator(x, y, λ, dv) = simple_light(V3(1, 0, 0), V3(-1, 0, 0), V3(0, 0, 1) * 0.3, V3(0, 1, 0) * 0.3, height, width, x, y, λ, dv)
+	#ray_generator(x, y, λ, dv) = simple_light(ℜ³(0, 1, 0), ℜ³(0, -1, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(1, 0, 0) * 0.3, height, width, x, y, λ, dv)
+	ray_generator(x, y, λ, dv) = simple_light(ℜ³(1, 0, 0), ℜ³(-1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, height, width, x, y, λ, dv)
 
 	rays = wrap_ray_gen(ray_generator; datastructs...)
     array_kwargs = Dict{Symbol, Any}()
@@ -63,9 +63,9 @@ function main()
 
 	# reverse trace image
     function my_moving_camera()
-        camera_pos = V3((0, 1, 0))
-        look_at = V3(0, 0, 0)
-        up = V3((0.0, 0.0, 1.0))
+        camera_pos = ℜ³((0, 1, 0))
+        look_at = ℜ³(0, 0, 0)
+        up = ℜ³((0.0, 0.0, 1.0))
         FOV = 45.0 * pi / 180.0
 
         return get_camera(camera_pos, look_at, up, FOV)

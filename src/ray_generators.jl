@@ -14,7 +14,7 @@ function camera_ray(camera, height, width, x, y, λ, dv)
         dv * 0.25f0 / max(height, width)
     dir = normalize(dir)
     idx = (y - 1) * height + x
-    return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 1, idx, λ, RAY_STATUS_ACTIVE)
+    return ADRay(camera.pos, zero(ℜ³), dir, zero(ℜ³), false, 1, idx, λ, RAY_STATUS_ACTIVE)
 end
 
 function simple_light(center, dir, δ1, δ2, height, width, x, y, λ, dv)
@@ -27,9 +27,9 @@ function simple_light(center, dir, δ1, δ2, height, width, x, y, λ, dv)
         cross(dv, δ2) ./ (width ÷ 2)
     return ADRay(
         origin,
-        zero(V3),
+        zero(ℜ³),
         dir,
-        zero(V3),
+        zero(ℜ³),
         false,
         1,
         0, # lights are forward tracing, dest not known ahead of time
@@ -43,7 +43,7 @@ function wrap_ray_gen(ray_generator; rays, row_indices, col_indices, dv, kwargs.
     width = length(col_indices)
     @assert length(rays) == width * height
     dv .=
-        V3.(
+        ℜ³.(
             CUDA.rand(Float32, height, width),
             CUDA.rand(Float32, height, width),
             CUDA.rand(Float32, height, width),

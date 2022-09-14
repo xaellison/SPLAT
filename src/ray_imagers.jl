@@ -7,7 +7,7 @@ function shade(r::FastRay, n, t, first_diffuse_index)::Float32
     # NB disregards in_medium
     # evolve to hit a diffuse surface
     d, n, t = get_hit((n, t), r)
-    r = FastRay(r.pos + r.dir * d, zero(V3), r.ignore_tri)
+    r = FastRay(r.pos + r.dir * d, zero(ℜ³), r.ignore_tri)
 
     if n >= first_diffuse_index
         # compute the position in the new triangle, set dir to zero
@@ -30,7 +30,7 @@ function shade(adr::ADRay, n, t, first_diffuse_index, λ)::Float32
     # evolve to hit a diffuse surface
     r = expand(adr, λ)
     d, n, t = get_hit((n, t), r)
-    r = FastRay(r.pos + r.dir * d, zero(V3), r.ignore_tri)
+    r = FastRay(r.pos + r.dir * d, zero(ℜ³), r.ignore_tri)
 
     if n >= first_diffuse_index
         # compute the position in the new triangle, set dir to zero

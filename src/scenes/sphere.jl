@@ -9,8 +9,8 @@ include("../procedural_assets.jl")
 
 function main()
 	# Tracing params
-    width = 1024
-    height = 1024
+    width = 2048
+    height = 2048
     dλ = 12.50f0
     λ_min = 400.0f0
     λ_max = 700.0f0
@@ -41,16 +41,16 @@ function main()
 	# Forward Trace light map
 
     function my_moving_camera()
-        camera_pos = V3((0, 5, 5))
-        look_at = zero(V3)
-        up = V3((0.0, 0.0, -1.0))
+        camera_pos = ℜ³((0, 5, 5))
+        look_at = zero(ℜ³)
+        up = ℜ³((0.0, 0.0, -1.0))
         FOV = 45.0 * pi / 180.0
 
         return get_camera(camera_pos, look_at, up, FOV)
     end
 
     cam = my_moving_camera()
-	ray_generator(x, y, λ, dv) = simple_light(V3(0, 0, 8), V3(0, 0, -1), V3(1, 0, 0), V3(0, 1, 0), height, width, x, y, λ, dv)
+	ray_generator(x, y, λ, dv) = simple_light(ℜ³(0, 0, 8), ℜ³(0, 0, -1), ℜ³(1, 0, 0), ℜ³(0, 1, 0), height, width, x, y, λ, dv)
 
 	rays = wrap_ray_gen(ray_generator; datastructs...)
     array_kwargs = Dict{Symbol, Any}()
@@ -61,7 +61,7 @@ function main()
     array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
     CUDA.@time run_evolution!(;basic_params..., array_kwargs...)
 
-	CUDA.@time expansion_light_map!(;basic_params..., array_kwargs...)
+	CUDA.@time continuum_light_map!(;basic_params..., array_kwargs...)
 
 	# reverse trace image
 	@unpack RGB3 = array_kwargs
@@ -77,7 +77,7 @@ function main()
     (;basic_params..., array_kwargs...)
 
 	CUDA.@time run_evolution!(;basic_params..., array_kwargs...)
-	CUDA.@time expansion_shade!(;basic_params..., array_kwargs...)
+	CUDA.@time continuum_shade!(;basic_params..., array_kwargs...)
 
 	# return image
 

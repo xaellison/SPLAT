@@ -7,7 +7,7 @@ function scene_datastructs(A; width, height, dλ, λ_min, λ_max, depth, kwargs.
     col_indices = reshape(A(1:width), 1, width)
     rays = A{ADRay}(undef, width * height)
     hit_idx = A(zeros(Int32, length(rays)))
-    dv = A{V3}(undef, height, width)
+    dv = A{ℜ³}(undef, height, width)
 
     # use host to compute constants used in turning spectra into colors
     spectrum = collect(λ_min:dλ:λ_max) |> a -> reshape(a, 1, 1, length(a))
@@ -25,6 +25,8 @@ function scene_datastructs(A; width, height, dλ, λ_min, λ_max, depth, kwargs.
 
     # Datastruct init
     expansion = A{FastRay}(undef, (length(rays)))
+    # for Sphere geometry:
+    # tmp = A{Tuple{Float32, Int32}}(undef, size(expansion))
     tmp = A{UInt64}(undef, size(expansion))
     rndm = rand(Float32, height * width)
     out = Dict{Symbol,Any}()

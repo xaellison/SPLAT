@@ -21,10 +21,10 @@ function main()
 	θ = 0.0f0
     θ += 2 * π / 360
 	tris = [
-        Sphere(zero(V3), 0.0f0),
-        #Sphere(V3(2.5, 3, 0), 1.0f0),
-		Sphere(V3(4, 0, 0), 1.0f0),
-        Sphere(V3(0, 0, 0), 1.0f0),
+        Sphere(zero(ℜ³), 0.0f0),
+        #Sphere(ℜ³(2.5, 3, 0), 1.0f0),
+		Sphere(ℜ³(4, 0, 0), 1.0f0),
+        Sphere(ℜ³(0, 0, 0), 1.0f0),
     ]
     n_tris = collect(zip(map(Int32, collect(1:length(tris))), tris)) |>
         m -> reshape(m, 1, length(m))
@@ -47,9 +47,9 @@ function main()
 	# Forward Trace light map
 
     function my_moving_camera(frame_i, frame_n)
-        camera_pos = V3((8, 0, 0)) #+ centroid
-        look_at = zero(V3)
-        up = V3((0.0, 0.0, -1.0))
+        camera_pos = ℜ³((8, 0, 0)) #+ centroid
+        look_at = zero(ℜ³)
+        up = ℜ³((0.0, 0.0, -1.0))
         FOV = 45.0 * pi / 180.0
 
         return get_camera(camera_pos, look_at, up, FOV)
@@ -57,8 +57,8 @@ function main()
 
     cam = my_moving_camera(1, 1)
 
-#	ray_generator(x, y, λ, dv) = simple_light(V3(7, 7, 0), V3(-1/sqrt(2), -1/sqrt(2), 0), V3(1 / sqrt(2), -1/sqrt(2), 0), V3(0, 0, 1), height, width, x, y, λ, dv)
-#	ray_generator(x, y, λ, dv) = simple_light(V3(2, -2, -2), V3(-1, 0, 0), V3(0, 0, 4), V3(0, 4, 0), height, width, x, y, λ)
+#	ray_generator(x, y, λ, dv) = simple_light(ℜ³(7, 7, 0), ℜ³(-1/sqrt(2), -1/sqrt(2), 0), ℜ³(1 / sqrt(2), -1/sqrt(2), 0), ℜ³(0, 0, 1), height, width, x, y, λ, dv)
+#	ray_generator(x, y, λ, dv) = simple_light(ℜ³(2, -2, -2), ℜ³(-1, 0, 0), ℜ³(0, 0, 4), ℜ³(0, 4, 0), height, width, x, y, λ)
 
 	#rays = wrap_ray_gen(ray_generator; datastructs...)
 
