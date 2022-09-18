@@ -52,3 +52,12 @@ function wrap_ray_gen(ray_generator; rays, row_indices, col_indices, dv, kwargs.
     rays .= ray_generator.(row_indices, col_indices, 550.0, dv)
     rays = reshape(rays, height * width)
 end
+
+function wrap_ray_gen2(ray_generator, height, width)
+    row_indices = CuArray(1:height)
+    col_indices = reshape(CuArray(1:width), (1, width))
+    dv = CUDA.rand(ℜ³, height, width)
+    rays = ray_generator.(row_indices, col_indices, 550.0f0, dv)
+    rays = reshape(rays, length(rays))
+    return rays
+end

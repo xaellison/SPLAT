@@ -36,24 +36,24 @@ function main()
         m -> reshape(m, 1, length(m))
 
 	Λ = CuArray(collect(λ_min:dλ:λ_max))
-	tex = checkered_tex(16, 16, length(Λ)) * 10
+	tex = checkered_tex(16, 16, length(Λ)) * 0
 
 	basic_params = Dict{Symbol, Any}()
 	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, sort_optimization, first_diffuse
 
-	datastructs = scene_datastructs(CuArray; basic_params...)
-
 	# Forward Trace light map
 
-
 	#ray_generator(x, y, λ, dv) = simple_light(ℜ³(0, 1, 0), ℜ³(0, -1, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(1, 0, 0) * 0.3, height, width, x, y, λ, dv)
-	ray_generator(x, y, λ, dv) = simple_light(ℜ³(1, 0, 0), ℜ³(-1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, height, width, x, y, λ, dv)
-
-	rays = wrap_ray_gen(ray_generator; datastructs...)
+	light1(x, y, λ, dv) = simple_light(ℜ³(1, 0, 0), ℜ³(-1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, height, width, x, y, λ, dv)
+	rays1 = wrap_ray_gen2(light1, height, width)
+	light2(x, y, λ, dv) = simple_light(ℜ³(-1, 0, 0), ℜ³(1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, height, width, x, y, λ, dv)
+	rays2 = wrap_ray_gen2(light2, height, width)
+	rays = vcat(rays1, rays2)
+	datastructs = forward_datastructs(CuArray, rays; basic_params...)
     array_kwargs = Dict{Symbol, Any}()
 
     @pack! array_kwargs = tex, tris, n_tris, rays
-	array_kwargs = merge(array_kwargs, datastructs)
+	array_kwargs = merge(datastructs, array_kwargs)
 
     array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
     CUDA.@time run_evolution!(;basic_params..., array_kwargs...)
@@ -62,6 +62,7 @@ function main()
 
 
 	# reverse trace image
+	datastructs = scene_datastructs(CuArray; basic_params...)
     function my_moving_camera()
         camera_pos = ℜ³((0, 1, 0))
         look_at = ℜ³(0, 0, 0)
@@ -74,14 +75,13 @@ function main()
     cam = my_moving_camera()
 
 	ray_generator2(x, y, λ, dv) = camera_ray(cam, height, width, x, y, λ, dv)
-	rays = wrap_ray_gen(ray_generator2; datastructs...)
-    array_kwargs = Dict{Symbol, Any}()
+	rays = wrap_ray_gen2(ray_generator2, height, width)
+	array_kwargs = Dict{Symbol, Any}()
 
-    @pack! array_kwargs = tex, tris, n_tris, rays
-	array_kwargs = merge(array_kwargs, datastructs)
+	@pack! array_kwargs = tex, tris, n_tris, rays
+	array_kwargs = merge(datastructs, array_kwargs)
 
     array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
-    (;basic_params..., array_kwargs...)
 
 	CUDA.@time run_evolution!(;basic_params..., array_kwargs...)
 	CUDA.@time continuum_shade!(;basic_params..., array_kwargs...)
