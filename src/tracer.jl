@@ -93,7 +93,7 @@ end
 
 function next_hit_kernel(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray{UInt64}, default ) where {X}
     # TODO: rename everything
-    shmem = @cuDynamicSharedMem(X, blockDim().x)
+    shmem = @cuDynamicSharedMem(Tuple{Int32, Tri}, blockDim().x)
 
     dest_idx = threadIdx().x + (blockIdx().x - 1) * blockDim().x
     r = rays[dest_idx]
@@ -102,7 +102,8 @@ function next_hit_kernel(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray
     min_val = Inf32
 
     if threadIdx().x + (blockIdx().y - 1) * blockDim().x <= length(n_tris)
-        shmem[threadIdx().x] = n_tris[threadIdx().x + (blockIdx().y - 1) * blockDim().x]
+        n, FT = n_tris[threadIdx().x + (blockIdx().y - 1) * blockDim().x]
+        shmem[threadIdx().x] = n, Tri(FT[1], FT[2], FT[3], FT[4])
     end
     sync_threads()
     for scan = 1:min(blockDim().x, length(n_tris) - (blockIdx().y - 1) * blockDim().x)
@@ -117,7 +118,7 @@ function next_hit_kernel(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray
 
     if dest_idx <= length(rays)
         operand = unsafe_encode(min_val, UInt32(arg_min))
-        CUDA.@atomic dest[dest_idx] = min(dest[dest_idx], operand)
+        dest[dest_idx] = min(dest[dest_idx], operand)
     end
     return nothing
 end
@@ -131,7 +132,7 @@ function next_hit!(dest, tmp, rays, n_tris)
 
     kernel = @cuda launch=false next_hit_kernel(my_args...)
     tmp.=typemax(UInt64)
-    get_shmem(threads) = threads * sizeof(eltype(n_tris))
+    get_shmem(threads) = threads * sizeof(Tuple{Int32, Tri})
     # TODO: this is running <= 50% occupancy. Need to put a cap on shmem smaller than block
     config = launch_configuration(kernel.fun, shmem=threads->get_shmem(threads))
     threads = config.threads
