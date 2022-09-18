@@ -45,9 +45,9 @@ function main()
 
 	#ray_generator(x, y, λ, dv) = simple_light(ℜ³(0, 1, 0), ℜ³(0, -1, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(1, 0, 0) * 0.3, height, width, x, y, λ, dv)
 	light1(x, y, λ, dv) = simple_light(ℜ³(1, 0, 0), ℜ³(-1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, height, width, x, y, λ, dv)
-	rays1 = wrap_ray_gen2(light1, height, width)
+	rays1 = wrap_ray_gen(light1, height, width)
 	light2(x, y, λ, dv) = simple_light(ℜ³(-1, 0, 0), ℜ³(1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, height, width, x, y, λ, dv)
-	rays2 = wrap_ray_gen2(light2, height, width)
+	rays2 = wrap_ray_gen(light2, height, width)
 	rays = vcat(rays1, rays2)
 	datastructs = forward_datastructs(CuArray, rays; basic_params...)
     array_kwargs = Dict{Symbol, Any}()
@@ -75,7 +75,7 @@ function main()
     cam = my_moving_camera()
 
 	ray_generator2(x, y, λ, dv) = camera_ray(cam, height, width, x, y, λ, dv)
-	rays = wrap_ray_gen2(ray_generator2, height, width)
+	rays = wrap_ray_gen(ray_generator2, height, width)
 	array_kwargs = Dict{Symbol, Any}()
 
 	@pack! array_kwargs = tex, tris, n_tris, rays

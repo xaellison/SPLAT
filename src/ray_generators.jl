@@ -38,25 +38,12 @@ function simple_light(center, dir, δ1, δ2, height, width, x, y, λ, dv)
     )
 end
 
-function wrap_ray_gen(ray_generator; rays, row_indices, col_indices, dv, kwargs...)
-    height = length(row_indices)
-    width = length(col_indices)
-    @assert length(rays) == width * height
-    dv .=
-        ℜ³.(
-            CUDA.rand(Float32, height, width),
-            CUDA.rand(Float32, height, width),
-            CUDA.rand(Float32, height, width),
-        )
-    rays = reshape(rays, height, width)
-    rays .= ray_generator.(row_indices, col_indices, 550.0, dv)
-    rays = reshape(rays, height * width)
-end
 
-function wrap_ray_gen2(ray_generator, height, width)
+function wrap_ray_gen(ray_generator, height, width)
     row_indices = CuArray(1:height)
     col_indices = reshape(CuArray(1:width), (1, width))
     dv = CUDA.rand(ℜ³, height, width)
+    # TODO: generalize to λ as broadcastable input, not hardcoded
     rays = ray_generator.(row_indices, col_indices, 550.0f0, dv)
     rays = reshape(rays, length(rays))
     return rays

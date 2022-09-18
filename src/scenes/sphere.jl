@@ -51,7 +51,7 @@ function main()
     cam = my_moving_camera()
 	ray_generator(x, y, λ, dv) = simple_light(ℜ³(0, 0, 8), ℜ³(0, 0, -1), ℜ³(1, 0, 0), ℜ³(0, 1, 0), height, width, x, y, λ, dv)
 
-	rays = wrap_ray_gen2(ray_generator, height, width)
+	rays = wrap_ray_gen(ray_generator, height, width)
 	datastructs = forward_datastructs(CuArray, rays; basic_params...)
     array_kwargs = Dict{Symbol, Any}()
 
@@ -66,7 +66,7 @@ function main()
 	# reverse trace image
 	datastructs = scene_datastructs(CuArray; basic_params...)
 	ray_generator2(x, y, λ, dv) = camera_ray(cam, height, width, x, y, λ, dv)
-	rays = wrap_ray_gen2(ray_generator2, height, width)
+	rays = wrap_ray_gen(ray_generator2, height, width)
     array_kwargs = Dict{Symbol, Any}()
 
     @pack! array_kwargs = tex, tris, n_tris, rays
