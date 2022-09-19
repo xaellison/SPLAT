@@ -27,17 +27,11 @@ function main()
 	first_diffuse = 1 + 1 + length(glass_sphere)
 	tris = foldl(vcat, meshes)
 
-    n_tris = collect(zip(map(Int32, collect(1:length(tris))), tris)) |>
-        m -> reshape(m, 1, length(m))
 
-	Λ = CuArray(collect(λ_min:dλ:λ_max))
-	tex = checkered_tex(16, 16, length(Λ)) * 20
+	tex = checkered_tex(32, 32, length(λ_min:dλ:λ_max))
 
 	basic_params = Dict{Symbol, Any}()
 	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, sort_optimization, first_diffuse
-
-
-	# Forward Trace light map
 
     function my_moving_camera()
         camera_pos = ℜ³((0, 5, 5))
@@ -53,34 +47,13 @@ function main()
 	lights = [
 		RectLight(ℜ³(0, 0, 8), ℜ³(0, 0, -1), ℜ³(1, 0, 0), ℜ³(0, 1, 0), height, width),
 	]
+
 	rays = rays_from_lights(lights)
 
-	datastructs = forward_datastructs(CuArray, rays; basic_params...)
-    array_kwargs = Dict{Symbol, Any}()
-
-    @pack! array_kwargs = tex, tris, n_tris, rays
-	array_kwargs = merge(datastructs, array_kwargs)
-
-    array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
-    CUDA.@time run_evolution!(;basic_params..., array_kwargs...)
-
-	CUDA.@time continuum_light_map!(;basic_params..., array_kwargs...)
-
-	# reverse trace image
-	datastructs = scene_datastructs(CuArray; basic_params...)
-	ray_generator2(x, y, λ, dv) = camera_ray(cam, height, width, x, y, λ, dv)
-	rays = wrap_ray_gen(ray_generator2, height, width)
-    array_kwargs = Dict{Symbol, Any}()
-
-    @pack! array_kwargs = tex, tris, n_tris, rays
-	array_kwargs = merge(datastructs, array_kwargs)
-
-    array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
-
-	CUDA.@time run_evolution!(;basic_params..., array_kwargs...)
-	CUDA.@time continuum_shade!(;basic_params..., array_kwargs...)
-
-	# return image
+	trace_kwargs = Dict{Symbol, Any}()
+	@pack! trace_kwargs = cam, rays, tex, tris, λ_min, dλ, λ_max
+	trace_kwargs = merge(basic_params, trace_kwargs)
+	array_kwargs = trace!(;trace_kwargs...)
 
 	@unpack RGB = array_kwargs
     RGB = Array(RGB)

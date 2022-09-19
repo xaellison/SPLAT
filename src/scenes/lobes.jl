@@ -52,21 +52,8 @@ function main()
 		RectLight(ℜ³(0, 0, -1), ℜ³(0, 0, 1), ℜ³(0, 1, 0) * 0.3, ℜ³(1, 0, 0) * 0.3, 512, 512),
 	]
 	rays = rays_from_lights(lights)
-	datastructs = forward_datastructs(CuArray, rays; basic_params...)
-    array_kwargs = Dict{Symbol, Any}()
 
-    @pack! array_kwargs = tex, tris, n_tris, rays
-	array_kwargs = merge(datastructs, array_kwargs)
-
-    array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
-    CUDA.@time run_evolution!(;basic_params..., array_kwargs...)
-
-	CUDA.@time continuum_light_map!(;basic_params..., array_kwargs...)
-
-
-	# reverse trace image
-	datastructs = scene_datastructs(CuArray; basic_params...)
-    function my_moving_camera()
+	function my_moving_camera()
         camera_pos = ℜ³((0, 1, 0))
         look_at = ℜ³(0, 0, 0)
         up = ℜ³((0.0, 0.0, 1.0))
@@ -77,19 +64,11 @@ function main()
 
     cam = my_moving_camera()
 
-	ray_generator2(x, y, λ, dv) = camera_ray(cam, height, width, x, y, λ, dv)
-	rays = wrap_ray_gen(ray_generator2, height, width)
-	array_kwargs = Dict{Symbol, Any}()
+	trace_kwargs = Dict{Symbol, Any}()
+	@pack! trace_kwargs = cam, rays, tex, tris, λ_min, dλ, λ_max
+	trace_kwargs = merge(basic_params, trace_kwargs)
 
-	@pack! array_kwargs = tex, tris, n_tris, rays
-	array_kwargs = merge(datastructs, array_kwargs)
-
-    array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
-
-	CUDA.@time run_evolution!(;basic_params..., array_kwargs...)
-	CUDA.@time continuum_shade!(;basic_params..., array_kwargs...)
-
-	# return image
+	array_kwargs = trace!(;trace_kwargs...)
 
 	@unpack RGB = array_kwargs
     RGB = Array(RGB)

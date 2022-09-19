@@ -265,3 +265,37 @@ function run_evolution!(;
     end
     return
 end
+
+function trace!(;cam, rays, tex, tris, λ_min, dλ, λ_max, width, height, depth, sort_optimization, first_diffuse)
+    basic_params = Dict{Symbol, Any}()
+	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, sort_optimization, first_diffuse
+    n_tris = tuple.(1:length(tris), tris) |> m -> reshape(m, 1, length(m))
+
+    Λ = CuArray(collect(λ_min:dλ:λ_max))
+
+	datastructs = forward_datastructs(CuArray, rays; basic_params...)
+    array_kwargs = Dict{Symbol, Any}()
+
+    @pack! array_kwargs = tex, tris, n_tris, rays
+	array_kwargs = merge(datastructs, array_kwargs)
+
+    array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
+    CUDA.@time run_evolution!(;basic_params..., array_kwargs...)
+
+	CUDA.@time continuum_light_map!(;basic_params..., array_kwargs...)
+
+	# reverse trace image
+	datastructs = scene_datastructs(CuArray; basic_params...)
+	ray_generator2(x, y, λ, dv) = camera_ray(cam, height, width, x, y, λ, dv)
+	rays = wrap_ray_gen(ray_generator2, height, width)
+    array_kwargs = Dict{Symbol, Any}()
+
+    @pack! array_kwargs = tex, tris, n_tris, rays
+	array_kwargs = merge(datastructs, array_kwargs)
+
+    array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
+
+	CUDA.@time run_evolution!(;basic_params..., array_kwargs...)
+	CUDA.@time continuum_shade!(;basic_params..., array_kwargs...)
+    return array_kwargs
+end
