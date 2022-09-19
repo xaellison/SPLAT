@@ -8,7 +8,7 @@ include("../utils.jl")
 include("../procedural_assets.jl")
 
 function main()
-	for frame in (collect(1:180))
+	for frame in (collect(1:9:180))
 	R = rotation_matrix(ℜ³(0, 0, 1), 2 * pi * (frame - 20) / 180)
 	# Tracing params
     width = 1024
@@ -22,8 +22,8 @@ function main()
 
 	# Geometry
 
-	lobe1 = mesh_to_FTri(load("objs/lobe1_1.obj"))
-	lobe2 = mesh_to_FTri(load("objs/lobe2_1.obj"))
+	lobe1 = mesh_to_FTri(load("objs/lobe1.obj"))
+	lobe2 = mesh_to_FTri(load("objs/lobe2_fix.obj"))
 	lobe1 = map(t -> translate(t, ℜ³(0, 0, -0.25) ), lobe1)
 	lobe1 = map(t -> rotate(t, R), lobe1)
 	lobe2 = map(t -> translate(t, ℜ³(0, 0, -0.25) ), lobe2)
@@ -36,7 +36,7 @@ function main()
         m -> reshape(m, 1, length(m))
 
 	Λ = CuArray(collect(λ_min:dλ:λ_max))
-	tex = CUDA.zeros(Float32, 256, 256, length(Λ))
+	tex = CUDA.zeros(Float32, 512, 512, length(Λ))
 
 	basic_params = Dict{Symbol, Any}()
 	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, sort_optimization, first_diffuse

@@ -37,22 +37,15 @@ function scene_datastructs(A; width, height, dλ, λ_min, λ_max, depth, kwargs.
     out = Dict{Symbol,Any}()
     @pack! out = RGB,
     RGB3,
-    row_indices,
-    col_indices,
-    rays,
-    hit_idx,
-    dv,
     spectrum,
     retina_factor,
-    expansion,
-    tmp,
-    rndm
+    expansion
     return out
 end
 
 
 function forward_datastructs(A, rays; dλ, λ_min, λ_max, kwargs...)
-    hit_idx = A(zeros(Int32, length(rays)))
+    #hit_idx = A(zeros(Int32, length(rays)))
 
     # use host to compute constants used in turning spectra into colors
     spectrum, retina_factor = _spectrum_datastructs(A, λ_min:dλ:λ_max)
@@ -61,14 +54,33 @@ function forward_datastructs(A, rays; dλ, λ_min, λ_max, kwargs...)
     expansion = A{FastRay}(undef, (length(rays)))
     # for Sphere geometry:
     # tmp = A{Tuple{Float32, Int32}}(undef, size(expansion))
-    tmp = A{UInt64}(undef, size(rays))
-    rndm = rand(Float32, length(rays))
+    # tmp = A{UInt64}(undef, size(rays))
+    # rndm = rand(Float32, length(rays))
     out = Dict{Symbol,Any}()
-    @pack! out = hit_idx,
-                 spectrum,
+    @pack! out = spectrum,
                  retina_factor,
-                 expansion,
-                 tmp,
-                 rndm
+                 expansion
+                 #rndm
     return out
 end
+
+abstract type AbstractHitter end
+
+struct StableHitter <: AbstractHitter
+    tmp :: AbstractArray{Tuple{Float32, Int32}}
+end
+
+struct ExperimentalHitter <: AbstractHitter
+    tmp :: AbstractArray{UInt64}
+end
+
+ExperimentalHitter(A, rays) = ExperimentalHitter(A{UInt64}(undef, size(rays)))
+
+#abstract type AbstractForwardTracer end
+
+struct Tracer
+    hit_idx :: AbstractArray{Int32}
+    rndm :: AbstractArray{Float32}
+end
+
+Tracer(A, rays) = Tracer(A{Int32}(undef, length(rays)), A{Float32}(undef, length(rays)))
