@@ -30,26 +30,6 @@ function camera_ray(camera, height, width, x, y, λ, dv)
     return ADRay(camera.pos, zero(ℜ³), dir, zero(ℜ³), false, 1, idx, λ, RAY_STATUS_ACTIVE)
 end
 
-function simple_light(center, dir, δ1, δ2, height, width, x, y, λ, dv)
-    # returns a rectangular cross-section, unidirectional light source
-    origin =
-        center +
-        δ1 * (x - height ÷ 2) / (height ÷ 2) +
-        δ2 * (y - width ÷ 2) / (width ÷ 2) +
-        cross(dv, δ1) ./ (height ÷ 2) +
-        cross(dv, δ2) ./ (width ÷ 2)
-    return ADRay(
-        origin,
-        zero(ℜ³),
-        dir,
-        zero(ℜ³),
-        false,
-        1,
-        0, # lights are forward tracing, dest not known ahead of time
-        λ,
-        RAY_STATUS_ACTIVE,
-    )
-end
 
 
 function wrap_ray_gen(ray_generator, height, width)
@@ -63,8 +43,30 @@ function wrap_ray_gen(ray_generator, height, width)
 end
 
 function rays_from_light(light :: RectLight)
-    L(x, y, λ, dv) = simple_light(light.center, light.dir, light.dim1, light.dim2, light.res1, light.res2, x, y, λ, dv)
-    return wrap_ray_gen(L, light.res1, light.res2)
+
+    function rect_light_ray(x, y, λ, dv)
+        # returns a rectangular cross-section, unidirectional light source
+        center, dir, δ1, δ2, height, width = light.center, light.dir, light.dim1, light.dim2, light.res1, light.res2
+        origin =
+            center +
+            δ1 * (x - height ÷ 2) / (height ÷ 2) +
+            δ2 * (y - width ÷ 2) / (width ÷ 2) +
+            cross(dv, δ1) ./ (height ÷ 2) +
+            cross(dv, δ2) ./ (width ÷ 2)
+        return ADRay(
+            origin,
+            zero(ℜ³),
+            dir,
+            zero(ℜ³),
+            false,
+            1,
+            0, # lights are forward tracing, dest not known ahead of time
+            λ,
+            RAY_STATUS_ACTIVE,
+        )
+    end
+
+    return wrap_ray_gen(rect_light_ray, light.res1, light.res2)
 end
 
 function rays_from_lights(lights :: AbstractArray{T}) where {T <: AbstractLight}
