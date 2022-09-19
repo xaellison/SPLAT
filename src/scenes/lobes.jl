@@ -36,7 +36,7 @@ function main()
         m -> reshape(m, 1, length(m))
 
 	Λ = CuArray(collect(λ_min:dλ:λ_max))
-	tex = checkered_tex(16, 16, length(Λ)) * 0
+	tex = CUDA.zeros(Float32, 256, 256, length(Λ))
 
 	basic_params = Dict{Symbol, Any}()
 	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, sort_optimization, first_diffuse
@@ -44,11 +44,14 @@ function main()
 	# Forward Trace light map
 
 	#ray_generator(x, y, λ, dv) = simple_light(ℜ³(0, 1, 0), ℜ³(0, -1, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(1, 0, 0) * 0.3, height, width, x, y, λ, dv)
-	light1(x, y, λ, dv) = simple_light(ℜ³(1, 0, 0), ℜ³(-1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, height, width, x, y, λ, dv)
-	rays1 = wrap_ray_gen(light1, height, width)
-	light2(x, y, λ, dv) = simple_light(ℜ³(-1, 0, 0), ℜ³(1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, height, width, x, y, λ, dv)
-	rays2 = wrap_ray_gen(light2, height, width)
-	rays = vcat(rays1, rays2)
+
+	lights = [
+		RectLight(ℜ³(1, 0, 0), ℜ³(-1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, 512, 512),
+		RectLight(ℜ³(-1, 0, 0), ℜ³(1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, 512, 512),
+		RectLight(ℜ³(0, 0, 1), ℜ³(0, 0, -1), ℜ³(0, 1, 0) * 0.3, ℜ³(1, 0, 0) * 0.3, 512, 512),
+		RectLight(ℜ³(0, 0, -1), ℜ³(0, 0, 1), ℜ³(0, 1, 0) * 0.3, ℜ³(1, 0, 0) * 0.3, 512, 512),
+	]
+	rays = rays_from_lights(lights)
 	datastructs = forward_datastructs(CuArray, rays; basic_params...)
     array_kwargs = Dict{Symbol, Any}()
 

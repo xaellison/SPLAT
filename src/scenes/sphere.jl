@@ -49,9 +49,12 @@ function main()
     end
 
     cam = my_moving_camera()
-	ray_generator(x, y, λ, dv) = simple_light(ℜ³(0, 0, 8), ℜ³(0, 0, -1), ℜ³(1, 0, 0), ℜ³(0, 1, 0), height, width, x, y, λ, dv)
 
-	rays = wrap_ray_gen(ray_generator, height, width)
+	lights = [
+		RectLight(ℜ³(0, 0, 8), ℜ³(0, 0, -1), ℜ³(1, 0, 0), ℜ³(0, 1, 0), height, width),
+	]
+	rays = rays_from_lights(lights)
+
 	datastructs = forward_datastructs(CuArray, rays; basic_params...)
     array_kwargs = Dict{Symbol, Any}()
 

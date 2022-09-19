@@ -1,3 +1,16 @@
+
+abstract type AbstractLight end
+
+struct RectLight <: AbstractLight
+    center :: ℜ³
+    dir :: ℜ³
+    dim1 :: ℜ³
+    dim2 :: ℜ³
+    res1 :: Int
+    res2 :: Int
+end
+
+
 # Functions that generate rays: camera + light sources
 
 function camera_ray(camera, height, width, x, y, λ, dv)
@@ -47,4 +60,13 @@ function wrap_ray_gen(ray_generator, height, width)
     rays = ray_generator.(row_indices, col_indices, 550.0f0, dv)
     rays = reshape(rays, length(rays))
     return rays
+end
+
+function rays_from_light(light :: RectLight)
+    L(x, y, λ, dv) = simple_light(light.center, light.dir, light.dim1, light.dim2, light.res1, light.res2, x, y, λ, dv)
+    return wrap_ray_gen(L, light.res1, light.res2)
+end
+
+function rays_from_lights(lights :: AbstractArray{T}) where {T <: AbstractLight}
+    return foldl(vcat, rays_from_light(light) for light in lights)
 end
