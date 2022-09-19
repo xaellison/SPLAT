@@ -173,7 +173,7 @@ function expansion_light_map!(; tris, hit_idx, tmp, rays, expansion, n_tris, spe
 end
 
 
-function continuum_shade!(;tracer, RGB3, RGB, tris, rays, n_tris, spectrum, expansion, first_diffuse, retina_factor, intensity=7f-2, dλ, tex, kwargs...)
+function continuum_shade!(;tracer, RGB3, RGB, tris, rays, n_tris, spectrum, first_diffuse, retina_factor, intensity=7f-2, dλ, tex, kwargs...)
     RGB3 .= 0.0f0
     tri_view = @view tris[tracer.hit_idx]
     # putting tex in a Ref prevents it from being broadcast over

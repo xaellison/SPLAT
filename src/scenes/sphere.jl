@@ -4,13 +4,12 @@ using Revise, LazyArrays, Parameters, GLMakie, CUDA, KernelAbstractions , CUDAKe
 include("../geo.jl")
 include("../skys.jl")
 include("../tracer.jl")
-include("../utils.jl")
 include("../procedural_assets.jl")
 
 function main()
 	# Tracing params
-    width = 2048
-    height = 2048
+    width = 512
+    height = 512
     dλ = 12.50f0
     λ_min = 400.0f0
     λ_max = 700.0f0
@@ -48,12 +47,10 @@ function main()
 		RectLight(ℜ³(0, 0, 8), ℜ³(0, 0, -1), ℜ³(1, 0, 0), ℜ³(0, 1, 0), height, width),
 	]
 
-	rays = rays_from_lights(lights)
-
 	trace_kwargs = Dict{Symbol, Any}()
-	@pack! trace_kwargs = cam, rays, tex, tris, λ_min, dλ, λ_max
+	@pack! trace_kwargs = cam, lights, tex, tris, λ_min, dλ, λ_max
 	trace_kwargs = merge(basic_params, trace_kwargs)
-	array_kwargs = trace!(;trace_kwargs...)
+	array_kwargs = trace!(StableHitter; trace_kwargs...)
 
 	@unpack RGB = array_kwargs
     RGB = Array(RGB)

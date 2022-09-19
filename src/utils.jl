@@ -37,8 +37,6 @@ function scene_datastructs(A; width, height, dλ, λ_min, λ_max, depth, kwargs.
     out = Dict{Symbol,Any}()
     @pack! out = RGB,
     RGB3,
-    spectrum,
-    retina_factor,
     expansion
     return out
 end
@@ -57,9 +55,7 @@ function forward_datastructs(A, rays; dλ, λ_min, λ_max, kwargs...)
     # tmp = A{UInt64}(undef, size(rays))
     # rndm = rand(Float32, length(rays))
     out = Dict{Symbol,Any}()
-    @pack! out = spectrum,
-                 retina_factor,
-                 expansion
+    @pack! out = expansion
                  #rndm
     return out
 end
@@ -69,6 +65,8 @@ abstract type AbstractHitter end
 struct StableHitter <: AbstractHitter
     tmp :: AbstractArray{Tuple{Float32, Int32}}
 end
+
+StableHitter(A, rays) = StableHitter(A{Tuple{Float32, Int32}}(undef, length(rays)))
 
 struct ExperimentalHitter <: AbstractHitter
     tmp :: AbstractArray{UInt64}
