@@ -15,7 +15,6 @@ function main()
     λ_max = 700.0f0
     depth = 3
     ITERS = 1
-    sort_optimization = false
 
 	# Geometry
 
@@ -30,7 +29,7 @@ function main()
 	tex = checkered_tex(32, 32, length(λ_min:dλ:λ_max))
 
 	basic_params = Dict{Symbol, Any}()
-	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, sort_optimization, first_diffuse
+	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse
 
     function my_moving_camera()
         camera_pos = ℜ³((0, 5, 5))

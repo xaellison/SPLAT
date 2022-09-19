@@ -91,39 +91,8 @@ function hit_argmin(i_T, r::FastRay)::Tuple{Float32,Int32}
     return get_hit(i_T, r)[1:2]
 end
 
-function zzz(threadmask, T, mask)
-    nx = T[1][1]
-    nx = shfl_sync(threadmask, nx, mask)
-    ny = T[1][2]
-    ny = shfl_sync(threadmask, ny, mask)
-    nz = T[1][3]
-    nz = shfl_sync(threadmask, nz, mask)
 
-    ax = T[2][1]
-    ax = shfl_sync(threadmask, ax, mask)
-    ay = T[2][2]
-    ay = shfl_sync(threadmask, ay, mask)
-    az = T[2][3]
-    az = shfl_sync(threadmask, az, mask)
-
-    bx = T[3][1]
-    bx = shfl_sync(threadmask, bx, mask)
-    by = T[3][2]
-    by = shfl_sync(threadmask, by, mask)
-    bz = T[3][3]
-    bz = shfl_sync(threadmask, bz, mask)
-
-    cx = T[4][1]
-    cx = shfl_sync(threadmask, cx, mask)
-    cy = T[4][2]
-    cy = shfl_sync(threadmask, cy, mask)
-    cz = T[4][3]
-    cz = shfl_sync(threadmask, cz, mask)
-    return Tri(ℜ³(nx, ny, nz), ℜ³(ax, ay, az), ℜ³(bx, by, bz), ℜ³(cx, cy, cz))
-end
-
-function next_hit_kernel(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray{UInt64}, default ) where {X}
-    # TODO: rename everything
+function next_hit_kernel(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray{UInt64}, default) where {X}
     shmem = @cuDynamicSharedMem(Tuple{Int32, Tri}, blockDim().x)
 
     dest_idx = threadIdx().x + (blockIdx().x - 1) * blockDim().x
@@ -261,43 +230,24 @@ function run_evolution!(;
     width::Int,
     dλ,
     depth,
-    sort_optimization,
     first_diffuse,
     n_tris,
     tris,
     rays,
     kwargs...,
 ) where {T}
-    intensity = 1.0f0
-    cutoff = length(rays)
     for iter = 1:depth
-        h_view = @view tracer.hit_idx[1:cutoff]
-        r_view = @view rays[1:cutoff]
-        #@info "$(length(r_view)) / $(length(rays)) = $(length(r_view) / length(rays))"
-        next_hit!(tracer, hitter, r_view, n_tris)
+        next_hit!(tracer, hitter, rays, n_tris)
         # evolve rays optically
         rand!(tracer.rndm)
-        tri_view = @view tris[h_view]
-        rand_view = @view tracer.rndm[1:cutoff]
+        tri_view = @view tris[tracer.hit_idx]
         # everything has to be a view of the same size to avoid allocs + be sort safe
-        r_view .= evolve_ray.(r_view, h_view, tri_view, rand_view, first_diffuse)
-
-        # retire appropriate rays
-        if sort_optimization
-            sort!(r_view, by = ray -> ray.status)
-            cutoff = count(ray -> ray.status == RAY_STATUS_ACTIVE, r_view)
-            cutoff = min(length(rays), cutoff + 256 - cutoff % 256)
-        end
-    end
-    if sort_optimization
-        # restore original order so we can use simple broadcasts to color RGB
-        # TODO: make abstraction so synchronize() works on GPU (if quicksort)
-        sort!(rays, by = r -> r.dest)
+        rays .= evolve_ray.(rays, tracer.hit_idx, tri_view, tracer.rndm, first_diffuse)
     end
     return
 end
 
-function trace!(hitter_type::Type{H}; cam, lights, tex, tris, λ_min, dλ, λ_max, width, height, depth, sort_optimization, first_diffuse) where H <: AbstractHitter
+function trace!(hitter_type::Type{H}; cam, lights, tex, tris, λ_min, dλ, λ_max, width, height, depth, first_diffuse) where H <: AbstractHitter
 
     # initialize rays for forward tracing
     rays = rays_from_lights(lights)
@@ -307,37 +257,30 @@ function trace!(hitter_type::Type{H}; cam, lights, tex, tris, λ_min, dλ, λ_ma
     spectrum, retina_factor = _spectrum_datastructs(CuArray, λ_min:dλ:λ_max)
 
     basic_params = Dict{Symbol, Any}()
-	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, sort_optimization, first_diffuse
+	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse
     n_tris = tuple.(Int32(1):Int32(length(tris)), tris) |> m -> reshape(m, 1, length(m))
 
     Λ = CuArray(collect(λ_min:dλ:λ_max))
-
-	datastructs = forward_datastructs(CuArray, rays; basic_params...)
-    array_kwargs = Dict{Symbol, Any}()
-
+	array_kwargs = Dict{Symbol, Any}()
     @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor
-	#array_kwargs = merge(datastructs, array_kwargs)
 
     array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
     CUDA.@time run_evolution!(;hitter=hitter, tracer=tracer, basic_params..., array_kwargs...)
-
 	CUDA.@time continuum_light_map!(;tracer=tracer, basic_params..., array_kwargs...)
 
 	# reverse trace image
-
     RGB3 = CuArray{Float32}(undef, width * height, 3)
     RGB3 .= 0
     RGB = CuArray{RGBf}(undef, width * height)
 
-	datastructs = scene_datastructs(CuArray; basic_params...)
-	ray_generator2(x, y, λ, dv) = camera_ray(cam, height, width, x, y, λ, dv)
-	rays = wrap_ray_gen(ray_generator2, height, width)
+	ray_generator(x, y, λ, dv) = camera_ray(cam, height, width, x, y, λ, dv)
+	rays = wrap_ray_gen(ray_generator, height, width)
+
     hitter = H(CuArray, rays)
     tracer = Tracer(CuArray, rays)
     array_kwargs = Dict{Symbol, Any}()
 
     @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor, RGB3, RGB
-    #array_kwargs = merge(datastructs, array_kwargs)
     array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
 
 	CUDA.@time run_evolution!(;hitter=hitter, tracer=tracer, basic_params..., array_kwargs...)
