@@ -15,11 +15,11 @@ const _COS_45 = 1 / sqrt(2)
 # element 1 is normal
 const Tri = SVector{4,ℜ³}
 const STri = SVector{7,ℜ³}
-const FTri = SVector{10, ℜ³}
+const FTri = SVector{10,ℜ³}
 
 struct Sphere
-    origin :: ℜ³
-    radius :: Float32
+    origin::ℜ³
+    radius::Float32
 end
 
 struct Cam
@@ -50,8 +50,17 @@ const RAY_STATUS_DIFFUSE = UInt8(0)
 const RAY_STATUS_INFINITY = UInt8(2)
 
 function retire(ray::ADRay, status)
-    return ADRay(ray.pos, ray.pos′, ray.dir, ray.dir′,
-                 ray.in_medium, ray.ignore_tri, ray.dest, ray.λ, status)
+    return ADRay(
+        ray.pos,
+        ray.pos′,
+        ray.dir,
+        ray.dir′,
+        ray.in_medium,
+        ray.ignore_tri,
+        ray.dest,
+        ray.λ,
+        status,
+    )
 end
 
 struct FastRay <: AbstractRay
@@ -60,25 +69,34 @@ struct FastRay <: AbstractRay
     ignore_tri::Int
 end
 
-FastRay(adray :: ADRay) = FastRay(adray.pos, adray.dir, adray.ignore_tri)
+FastRay(adray::ADRay) = FastRay(adray.pos, adray.dir, adray.ignore_tri)
 
 Base.zero(::ℜ³) = ℜ³(0.0f0, 0.0f0, 0.0f0)
 
 Base.zero(::Type{FastRay}) = FastRay(zero(ℜ³), zero(ℜ³), 1)
-Base.zero(::Type{ADRay}) = ADRay(zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), false, 1, -1, 0.0f0, zero(UInt8))
+Base.zero(::Type{ADRay}) =
+    ADRay(zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), false, 1, -1, 0.0f0, zero(UInt8))
 
-translate(t :: Tri, v) = Tri(t[1], t[2] + v, t[3] + v, t[4] + v)
-translate(t :: STri, v) = STri(t[1], t[2] + v, t[3] + v, t[4] + v, t[5], t[6], t[7])
-translate(t :: FTri, v) = FTri(t[1], t[2] + v, t[3] + v, t[4] + v, t[5], t[6], t[7], t[8], t[9], t[10])
-rotate(t :: FTri, R) = FTri(R * t[1], R * t[2], R * t[3], R * t[4], R * t[5], R * t[6], R * t[7], t[8], t[9], t[10])
+translate(t::Tri, v) = Tri(t[1], t[2] + v, t[3] + v, t[4] + v)
+translate(t::STri, v) = STri(t[1], t[2] + v, t[3] + v, t[4] + v, t[5], t[6], t[7])
+translate(t::FTri, v) =
+    FTri(t[1], t[2] + v, t[3] + v, t[4] + v, t[5], t[6], t[7], t[8], t[9], t[10])
+rotate(t::FTri, R) = FTri(
+    R * t[1],
+    R * t[2],
+    R * t[3],
+    R * t[4],
+    R * t[5],
+    R * t[6],
+    R * t[7],
+    t[8],
+    t[9],
+    t[10],
+)
 
 
-function expand(r :: ADRay, λ :: Float32) :: FastRay
-    return FastRay(
-        r.pos + r.pos′ * (λ - r.λ),
-        r.dir + r.dir′ * (λ - r.λ),
-        r.ignore_tri,
-    )
+function expand(r::ADRay, λ::Float32)::FastRay
+    return FastRay(r.pos + r.pos′ * (λ - r.λ), r.dir + r.dir′ * (λ - r.λ), r.ignore_tri)
 end
 
 function rand(::ℜ³)
@@ -104,7 +122,7 @@ function optical_normal(t::Tri, p)
     t[1]
 end
 
-function optical_normal(t::STri, pos :: V) :: V where V
+function optical_normal(t::STri, pos::V)::V where {V}
     #return t[1]
     a, b, c = t[2], t[3], t[4]
     n_a, n_b, n_c = t[5], t[6], t[7]
@@ -112,11 +130,11 @@ function optical_normal(t::STri, pos :: V) :: V where V
     return normalize(n_a * u + n_b * v + n_c * (1 - u - v))
 end
 
-function optical_normal(t::FTri, pos::V) :: V where V
+function optical_normal(t::FTri, pos::V)::V where {V}
     optical_normal(STri(t[1], t[2], t[3], t[4], t[5], t[6], t[7]), pos)
 end
 
-function tex_uv(r :: R, t) where {R <: AbstractRay}
+function tex_uv(r::R, t) where {R<:AbstractRay}
     tex_uv(r.pos, t)
 end
 
@@ -140,25 +158,25 @@ function reverse_uv(P, t)
     # https://www.scratchapixel.com/lessons/3d-basic-rendering/ray-tracing-rendering-a-triangle/barycentric-coordinates
     v0, v1, v2 = t[2], t[3], t[4]
 
-    v0v1 = v1 - v0;
-    v0v2 = v2 - v0;
+    v0v1 = v1 - v0
+    v0v2 = v2 - v0
     #// no need to normalize
     N = cross(v0v1, v0v2)
     denom = dot(N, N)
 
-    edge1 = v2 - v1;
-    vp1 = P - v1;
-    C = cross(edge1, vp1);
+    edge1 = v2 - v1
+    vp1 = P - v1
+    C = cross(edge1, vp1)
     u = dot(N, C)
 
     #// edge 2
-    edge2 = v0 - v2;
-    vp2 = P - v2;
-    C = cross(edge2, vp2);
+    edge2 = v0 - v2
+    vp2 = P - v2
+    C = cross(edge2, vp2)
     v = dot(N, C)
 
-    u /= denom;
-    v /= denom;
+    u /= denom
+    v /= denom
     return u, v
 end
 
@@ -226,7 +244,10 @@ function mesh_to_STri(mesh)::Array{STri}
         push!(out, STri(cross(v1 - v2, v2 - v3), v1, v2, v3, n1, n2, n3))
     end
     # prepend degenerate triangle which will alway fail hit tests
-    prepend!(out, [STri(zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³))])
+    prepend!(
+        out,
+        [STri(zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³))],
+    )
     out
 end
 
@@ -239,7 +260,23 @@ function mesh_to_FTri(mesh)::Array{FTri}
         push!(out, FTri(cross(v1 - v2, v2 - v3), v1, v2, v3, n1, n2, n3, t1, t2, t3))
     end
     # prepend degenerate triangle which will alway fail hit tests
-    prepend!(out, [FTri(zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³))])
+    prepend!(
+        out,
+        [
+            FTri(
+                zero(ℜ³),
+                zero(ℜ³),
+                zero(ℜ³),
+                zero(ℜ³),
+                zero(ℜ³),
+                zero(ℜ³),
+                zero(ℜ³),
+                zero(ℜ³),
+                zero(ℜ³),
+                zero(ℜ³),
+            ),
+        ],
+    )
     out
 end
 
@@ -254,7 +291,7 @@ function model_box(vertices)
     return (min_x, max_x, min_y, max_y, min_z, max_z)
 end
 
-function model_box(tris::Array{T}) where {T <: Union{Tri, STri, FTri}}
+function model_box(tris::Array{T}) where {T<:Union{Tri,STri,FTri}}
     min_x = minimum(map(t -> minimum(map(v -> v[1], t[2:4])), tris))
     min_y = minimum(map(t -> minimum(map(v -> v[2], t[2:4])), tris))
     min_z = minimum(map(t -> minimum(map(v -> v[3], t[2:4])), tris))
@@ -266,10 +303,10 @@ end
 
 function _centroid(tris)::ℜ³
     avg(i) = sum(sum(v[i] for v in t[2:4]) for t in tris) / (3 * length(tris))
-    return ℜ³(map(avg, [1,2,3])...)
+    return ℜ³(map(avg, [1, 2, 3])...)
 end
 
-function centroidish(tris) :: ℜ³
+function centroidish(tris)::ℜ³
     v = model_box(tris)
     lo = ℜ³(v[1:2:end]...)
     hi = ℜ³(v[2:2:end]...)
@@ -298,9 +335,9 @@ function rotation_matrix(axis, θ)
     return RotMatrix{3,Float32}(M)
 end
 
-function distance_to_sphere(r_pos, r_dir, s :: Sphere)
+function distance_to_sphere(r_pos, r_dir, s::Sphere)
     # schwartz inequality: radical can't be positive if radius = 0
-    radical = dot(r_dir, r_pos - s.origin) ^ 2 - (norm(r_pos - s.origin) ^ 2 - s.radius ^ 2)
+    radical = dot(r_dir, r_pos - s.origin)^2 - (norm(r_pos - s.origin)^2 - s.radius^2)
     # if it exactly hits at 1 point, discard this infinitesimal edge case
     if radical <= 0
         return Inf32
@@ -319,11 +356,7 @@ function distance_to_sphere(r_pos, r_dir, s :: Sphere)
     return Inf32
 end
 
-@inline function distance_to_plane(
-    origin,
-    dir,
-    plane_point,
-    normal)
+@inline function distance_to_plane(origin, dir, plane_point, normal)
     normal = normalize(normal)
     dist = (dot(normal, plane_point) - dot(normal, origin)) / dot(normal, dir)
 end
@@ -333,12 +366,7 @@ function distance_to_plane(r, T)
 end
 
 function distance_to_plane(r, T, λ)
-    distance_to_plane(
-        r.pos + r.pos′ * (λ - r.λ),
-        r.dir + r.dir′ * (λ - r.λ),
-        T[2],
-        T[1],
-    )
+    distance_to_plane(r.pos + r.pos′ * (λ - r.λ), r.dir + r.dir′ * (λ - r.λ), T[2], T[1])
 end
 
 function same_side(p1, p2, _a, _b)
@@ -437,7 +465,7 @@ function can_refract(v, normal, n1, n2)::Bool
     return abs(s2) < 1 - ϵ
 end
 
-function can_refract_λ(v, normal, n1, n2, λ::N) where N
+function can_refract_λ(v, normal, n1, n2, λ::N) where {N}
     return can_refract(v(λ), normal(λ), n1(λ), n2(λ))
 end
 
@@ -456,6 +484,6 @@ function refract(v, normal, n1, n2)
     return normalize(v * (n1 / n2) + n * ((n1 / n2) * c1 - c2))
 end
 
-function refract_λ(v, n, n1, n2, λ::N) where N
+function refract_λ(v, n, n1, n2, λ::N) where {N}
     return refract(v(λ), normal(λ), n1(λ), n2(λ))
 end

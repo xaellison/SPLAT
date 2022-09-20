@@ -39,7 +39,7 @@ function get_hit(i_S::Tuple{Int32,Sphere}, r::ADRay; kwargs...)
 end
 
 function get_hit(
-    i_T::Tuple{Int32, AbstractTri},
+    i_T::Tuple{Int32,AbstractTri},
     r::AbstractRay;
     unsafe = false,
 )::Tuple{Float32,Int32,AbstractTri} where {AbstractTri}
@@ -92,8 +92,13 @@ function hit_argmin(i_T, r::FastRay)::Tuple{Float32,Int32}
 end
 
 
-function next_hit_kernel(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray{UInt64}, default) where {X}
-    shmem = @cuDynamicSharedMem(Tuple{Int32, Tri}, blockDim().x)
+function next_hit_kernel(
+    rays,
+    n_tris::AbstractArray{X},
+    dest::AbstractArray{UInt64},
+    default,
+) where {X}
+    shmem = @cuDynamicSharedMem(Tuple{Int32,Tri}, blockDim().x)
 
     dest_idx = threadIdx().x + (blockIdx().x - 1) * blockDim().x
     r = rays[dest_idx]
@@ -104,7 +109,7 @@ function next_hit_kernel(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray
     i = 1
     T = zero(Tri)
     if threadIdx().x + (blockIdx().y - 1) * blockDim().x <= length(n_tris)
-        i, FT = n_tris[threadIdx().x + (blockIdx().y - 1) * blockDim().x]
+        i, FT = n_tris[threadIdx().x+(blockIdx().y-1)*blockDim().x]
         shmem[threadIdx().x] = i, Tri(FT[1], FT[2], FT[3], FT[4])
     end
     sync_threads()
@@ -132,19 +137,19 @@ function next_hit!(tracer, hitter::ExperimentalHitter, rays, n_tris)
     tmp_view = @view hitter.tmp[1:length(rays)]
     my_args = rays, n_tris, tmp_view, Int32(1)
 
-    kernel = @cuda launch=false next_hit_kernel(my_args...)
+    kernel = @cuda launch = false next_hit_kernel(my_args...)
     tmp_view .= typemax(UInt64)
-    get_shmem(threads) = threads * sizeof(Tuple{Int32, Tri})
+    get_shmem(threads) = threads * sizeof(Tuple{Int32,Tri})
     # TODO: this is running <= 50% occupancy. Need to put a cap on shmem smaller than block
-    config = launch_configuration(kernel.fun, shmem=threads->get_shmem(threads))
+    config = launch_configuration(kernel.fun, shmem = threads -> get_shmem(threads))
     threads = config.threads
     blocks = (cld(length(rays), threads), cld(length(n_tris), threads))
-    kernel(my_args...; blocks=blocks, threads=threads, shmem=get_shmem(threads))
+    kernel(my_args...; blocks = blocks, threads = threads, shmem = get_shmem(threads))
     tracer.hit_idx .= unsafe_decode.(tmp_view)
     return
 end
 
-function next_hit!(tracer, hitter::StableHitter, rays, n_tris::AbstractArray{X}) where X
+function next_hit!(tracer, hitter::StableHitter, rays, n_tris::AbstractArray{X}) where {X}
     tmp_view = @view hitter.tmp[1:length(rays)]
     @tullio (min) tmp_view[i] = hit_argmin(n_tris[j], rays[i])
     d_view = @view tracer.hit_idx[:]
@@ -247,7 +252,20 @@ function run_evolution!(;
     return
 end
 
-function trace!(hitter_type::Type{H}; cam, lights, tex, tris, λ_min, dλ, λ_max, width, height, depth, first_diffuse) where H <: AbstractHitter
+function trace!(
+    hitter_type::Type{H};
+    cam,
+    lights,
+    tex,
+    tris,
+    λ_min,
+    dλ,
+    λ_max,
+    width,
+    height,
+    depth,
+    first_diffuse,
+) where {H<:AbstractHitter}
 
     # initialize rays for forward tracing
     rays = rays_from_lights(lights)
@@ -256,34 +274,44 @@ function trace!(hitter_type::Type{H}; cam, lights, tex, tris, λ_min, dλ, λ_ma
 
     spectrum, retina_factor = _spectrum_datastructs(CuArray, λ_min:dλ:λ_max)
 
-    basic_params = Dict{Symbol, Any}()
-	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse
+    basic_params = Dict{Symbol,Any}()
+    @pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse
     n_tris = tuple.(Int32(1):Int32(length(tris)), tris) |> m -> reshape(m, 1, length(m))
 
     Λ = CuArray(collect(λ_min:dλ:λ_max))
-	array_kwargs = Dict{Symbol, Any}()
+    array_kwargs = Dict{Symbol,Any}()
     @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor
 
-    array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
-    CUDA.@time run_evolution!(;hitter=hitter, tracer=tracer, basic_params..., array_kwargs...)
-	CUDA.@time continuum_light_map!(;tracer=tracer, basic_params..., array_kwargs...)
+    array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
+    CUDA.@time run_evolution!(;
+        hitter = hitter,
+        tracer = tracer,
+        basic_params...,
+        array_kwargs...,
+    )
+    CUDA.@time continuum_light_map!(; tracer = tracer, basic_params..., array_kwargs...)
 
-	# reverse trace image
+    # reverse trace image
     RGB3 = CuArray{Float32}(undef, width * height, 3)
     RGB3 .= 0
     RGB = CuArray{RGBf}(undef, width * height)
 
-	ray_generator(x, y, λ, dv) = camera_ray(cam, height, width, x, y, λ, dv)
-	rays = wrap_ray_gen(ray_generator, height, width)
+    ray_generator(x, y, λ, dv) = camera_ray(cam, height, width, x, y, λ, dv)
+    rays = wrap_ray_gen(ray_generator, height, width)
 
     hitter = H(CuArray, rays)
     tracer = Tracer(CuArray, rays)
-    array_kwargs = Dict{Symbol, Any}()
+    array_kwargs = Dict{Symbol,Any}()
 
     @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor, RGB3, RGB
-    array_kwargs = Dict(kv[1]=>CuArray(kv[2]) for kv in array_kwargs)
+    array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
 
-	CUDA.@time run_evolution!(;hitter=hitter, tracer=tracer, basic_params..., array_kwargs...)
-	CUDA.@time continuum_shade!(;tracer=tracer, basic_params..., array_kwargs...)
+    CUDA.@time run_evolution!(;
+        hitter = hitter,
+        tracer = tracer,
+        basic_params...,
+        array_kwargs...,
+    )
+    CUDA.@time continuum_shade!(; tracer = tracer, basic_params..., array_kwargs...)
     return array_kwargs
 end

@@ -2,12 +2,12 @@
 abstract type AbstractLight end
 
 struct RectLight <: AbstractLight
-    center :: ℜ³
-    dir :: ℜ³
-    dim1 :: ℜ³
-    dim2 :: ℜ³
-    res1 :: Int
-    res2 :: Int
+    center::ℜ³
+    dir::ℜ³
+    dim1::ℜ³
+    dim2::ℜ³
+    res1::Int
+    res2::Int
 end
 
 
@@ -42,11 +42,12 @@ function wrap_ray_gen(ray_generator, height, width)
     return rays
 end
 
-function rays_from_light(light :: RectLight)
+function rays_from_light(light::RectLight)
 
     function rect_light_ray(x, y, λ, dv)
         # returns a rectangular cross-section, unidirectional light source
-        center, dir, δ1, δ2, height, width = light.center, light.dir, light.dim1, light.dim2, light.res1, light.res2
+        center, dir, δ1, δ2, height, width =
+            light.center, light.dir, light.dim1, light.dim2, light.res1, light.res2
         origin =
             center +
             δ1 * (x - height ÷ 2) / (height ÷ 2) +
@@ -69,6 +70,6 @@ function rays_from_light(light :: RectLight)
     return wrap_ray_gen(rect_light_ray, light.res1, light.res2)
 end
 
-function rays_from_lights(lights :: AbstractArray{T}) where {T <: AbstractLight}
+function rays_from_lights(lights::AbstractArray{T}) where {T<:AbstractLight}
     return foldl(vcat, rays_from_light(light) for light in lights)
 end

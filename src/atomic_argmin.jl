@@ -53,7 +53,7 @@ function unsafe_decode_parts(i32::UInt32)
     return sign, exp, sig
 end
 
-function unsafe_decode(i32::UInt32) :: Float32
+function unsafe_decode(i32::UInt32)::Float32
     u_sign, u_exp, u_sig = unsafe_decode_parts(i32)
     if (u_sign, u_exp, u_sig) == (1, 0, 0)
         # special case avoids 0.0f0 -> 5.877472f-39
@@ -62,26 +62,26 @@ function unsafe_decode(i32::UInt32) :: Float32
     if u_sign > 0
         exp = Int32(u_exp) - 127
         sig = Float32(u_sig) / (1 << 23) + 1
-        return 2.0f0 ^ exp * sig
+        return 2.0f0^exp * sig
     else
         exp = 127 - Int32(u_exp)
         sig = Float32(u_sig) / (1 << 23) - 2
-        return 2.0f0 ^ exp * sig
+        return 2.0f0^exp * sig
     end
 end
 
 function test_array()
     # numbers that we definitely want in the test
     special_numbers = [-Inf32, 0.0f0, Inf32]
-    A = foldl(vcat, rand(Float32, 1000) * (2.0f0 ^ i) .* 2 .- 1 for i in -100:5:100)
+    A = foldl(vcat, rand(Float32, 1000) * (2.0f0^i) .* 2 .- 1 for i = -100:5:100)
     A = vcat(A, special_numbers)
     A
 end
 
 function test_reversibility()
     A = test_array()
-    if ! all(unsafe_decode.(unsafe_encode.(A)) .== A)
-        failure = findfirst(i->unsafe_decode(unsafe_encode(A[i]))!=A[i], 1:length(A))
+    if !all(unsafe_decode.(unsafe_encode.(A)) .== A)
+        failure = findfirst(i -> unsafe_decode(unsafe_encode(A[i])) != A[i], 1:length(A))
         @error "Fails for float = $(A[failure])"
         return false
     end

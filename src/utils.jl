@@ -17,13 +17,13 @@ end
 abstract type AbstractHitter end
 
 struct StableHitter <: AbstractHitter
-    tmp :: AbstractArray{Tuple{Float32, Int32}}
+    tmp::AbstractArray{Tuple{Float32,Int32}}
 end
 
-StableHitter(A, rays) = StableHitter(A{Tuple{Float32, Int32}}(undef, length(rays)))
+StableHitter(A, rays) = StableHitter(A{Tuple{Float32,Int32}}(undef, length(rays)))
 
 struct ExperimentalHitter <: AbstractHitter
-    tmp :: AbstractArray{UInt64}
+    tmp::AbstractArray{UInt64}
 end
 
 ExperimentalHitter(A, rays) = ExperimentalHitter(A{UInt64}(undef, size(rays)))
@@ -31,8 +31,8 @@ ExperimentalHitter(A, rays) = ExperimentalHitter(A{UInt64}(undef, size(rays)))
 #abstract type AbstractForwardTracer end
 
 struct Tracer
-    hit_idx :: AbstractArray{Int32}
-    rndm :: AbstractArray{Float32}
+    hit_idx::AbstractArray{Int32}
+    rndm::AbstractArray{Float32}
 end
 
 Tracer(A, rays) = Tracer(A{Int32}(undef, length(rays)), A{Float32}(undef, length(rays)))
