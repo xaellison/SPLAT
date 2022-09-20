@@ -92,13 +92,9 @@ function hit_argmin(i_T, r::FastRay)::Tuple{Float32,Int32}
 end
 
 
-function next_hit_kernel(
-    rays,
-    n_tris::AbstractArray{X},
-    dest::AbstractArray{UInt64},
-    default,
-) where {X}
-    shmem = @cuDynamicSharedMem(Tuple{Int32,Tri}, blockDim().x)
+function next_hit_kernel(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray{UInt64}, default ) where {X}
+    # TODO: rename everything
+    shmem = @cuDynamicSharedMem(Tuple{Int32, Tri}, blockDim().x)
 
     dest_idx = threadIdx().x + (blockIdx().x - 1) * blockDim().x
     r = rays[dest_idx]
@@ -106,10 +102,8 @@ function next_hit_kernel(
     arg_min = default
     min_val = Inf32
 
-    i = 1
-    T = zero(Tri)
     if threadIdx().x + (blockIdx().y - 1) * blockDim().x <= length(n_tris)
-        i, FT = n_tris[threadIdx().x+(blockIdx().y-1)*blockDim().x]
+        i, FT = n_tris[threadIdx().x + (blockIdx().y - 1) * blockDim().x]
         shmem[threadIdx().x] = i, Tri(FT[1], FT[2], FT[3], FT[4])
     end
     sync_threads()
@@ -123,29 +117,26 @@ function next_hit_kernel(
         end
     end
 
-    if dest_idx <= length(rays)
-        operand = unsafe_encode(min_val, UInt32(arg_min))
-        CUDA.@atomic dest[dest_idx] = min(dest[dest_idx], operand)
-    end
+    operand = unsafe_encode(min_val, UInt32(arg_min))
+    dest[dest_idx] = min(dest[dest_idx], operand)
     return nothing
 end
 
 
-
-
 function next_hit!(tracer, hitter::ExperimentalHitter, rays, n_tris)
-    tmp_view = @view hitter.tmp[1:length(rays)]
-    my_args = rays, n_tris, tmp_view, Int32(1)
+    # fuzzy req: length(rays) should = 0 mod 128/256/512
+    my_args = rays, n_tris, hitter.tmp, Int32(1)
 
     kernel = @cuda launch = false next_hit_kernel(my_args...)
-    tmp_view .= typemax(UInt64)
+    hitter.tmp .= typemax(UInt64)
     get_shmem(threads) = threads * sizeof(Tuple{Int32,Tri})
     # TODO: this is running <= 50% occupancy. Need to put a cap on shmem smaller than block
     config = launch_configuration(kernel.fun, shmem = threads -> get_shmem(threads))
-    threads = config.threads
+    threads = 1 << exponent(config.threads)
+    @assert length(rays) % threads == 0
     blocks = (cld(length(rays), threads), cld(length(n_tris), threads))
     kernel(my_args...; blocks = blocks, threads = threads, shmem = get_shmem(threads))
-    tracer.hit_idx .= unsafe_decode.(tmp_view)
+    tracer.hit_idx .= unsafe_decode.(hitter.tmp)
     return
 end
 

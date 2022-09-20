@@ -49,7 +49,7 @@ function main()
 	trace_kwargs = Dict{Symbol, Any}()
 	@pack! trace_kwargs = cam, lights, tex, tris, λ_min, dλ, λ_max
 	trace_kwargs = merge(basic_params, trace_kwargs)
-	array_kwargs = trace!(StableHitter; trace_kwargs...)
+	array_kwargs = trace!(ExperimentalHitter; trace_kwargs...)
 
 	@unpack RGB = array_kwargs
     RGB = Array(RGB)
