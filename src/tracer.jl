@@ -140,6 +140,71 @@ function next_hit!(tracer, hitter::ExperimentalHitter, rays, n_tris)
     return
 end
 
+
+function next_hit_kernel2(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray{UInt64}, default ) where {X}
+    ray_idx = threadIdx().y + (blockIdx().x - 1) * blockDim().y
+    tri_idx = threadIdx().x + (blockIdx().y - 1) * blockDim().x
+
+    r = rays[ray_idx]
+
+    arg_min = default
+    min_val = Inf32
+
+    i = zero(Int32)
+    T = Tri(zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³))
+    if tri_idx <= length(n_tris)
+        i, FT = n_tris[tri_idx]#[1]
+    #    T = Tri(n_tris[tri_idx][2][1], n_tris[tri_idx][2][2], n_tris[tri_idx][2][3], n_tris[tri_idx][2][4])
+        T = Tri(FT[1], FT[2], FT[3], FT[4])
+    end
+
+    t = distance_to_plane(r, T)
+    p = r.pos + r.dir * t
+    if in_triangle(p, T) && min_val > t > 0 && r.ignore_tri != i
+        arg_min = i
+        min_val = t
+    end
+
+
+    for shuffle_step in 0:4
+        sync_warp()
+        neighbor_arg_min = shfl_down_sync(0xFFFFFFFF, arg_min, 1<<shuffle_step)
+        neighbor_min_val = shfl_down_sync(0xFFFFFFFF, min_val, 1<<shuffle_step)
+        if neighbor_min_val < min_val
+            arg_min = neighbor_arg_min
+            min_val = neighbor_min_val
+        end
+    end
+
+    if threadIdx().x == 1
+        operand = unsafe_encode(min_val, UInt32(arg_min))
+        CUDA.@atomic dest[ray_idx] = min(dest[ray_idx], operand)
+    end
+    return nothing
+end
+
+
+function next_hit!(tracer, hitter::ExperimentalHitter2, rays, n_tris)
+    # fuzzy req: length(rays) should = 0 mod 128/256/512
+    my_args = rays, n_tris, hitter.tmp, Int32(1)
+
+    kernel = @cuda launch = false next_hit_kernel2(my_args...)
+    @info "registers =  $(CUDA.registers(kernel))"
+    hitter.tmp .= typemax(UInt64)
+    # TODO: this is running <= 50% occupancy. Need to put a cap on shmem smaller than block
+    config = launch_configuration(kernel.fun)
+    thread_count = 1 << exponent(config.threads)
+    threads = (32, thread_count ÷ 32)
+    @info "block size = $threads"
+    #@assert length(rays) % threads == 0
+    # the totally confusing flip of xy for ray/tri at the block/grid level
+    # is to keep grid size within maximum but also tris along thread_x (warp)
+    blocks = (cld(length(rays), threads[2]), cld(length(n_tris), threads[1]))
+    kernel(my_args...; blocks = blocks, threads = threads)
+    tracer.hit_idx .= unsafe_decode.(hitter.tmp)
+    return
+end
+
 function next_hit!(tracer, hitter::StableHitter, rays, n_tris::AbstractArray{X}) where {X}
     tmp_view = @view hitter.tmp[1:length(rays)]
     @tullio (min) tmp_view[i] = hit_argmin(n_tris[j], rays[i])

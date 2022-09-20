@@ -28,6 +28,14 @@ end
 
 ExperimentalHitter(A, rays) = ExperimentalHitter(A{UInt64}(undef, size(rays)))
 
+struct ExperimentalHitter2 <: AbstractHitter
+    tmp::AbstractArray{UInt64}
+end
+
+ExperimentalHitter2(A, rays) = ExperimentalHitter2(A{UInt64}(undef, size(rays)))
+
+
+
 #abstract type AbstractForwardTracer end
 
 struct Tracer
