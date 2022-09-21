@@ -1,5 +1,8 @@
 using Tullio
 using ForwardDiff
+
+## Geometric functions
+
 function get_hit(i_S::Tuple{Int32,Sphere}, r::AbstractRay; kwargs...)
     # https://en.wikipedia.org/wiki/Line%E2%80%93sphere_intersection
     i, S = i_S
@@ -60,8 +63,7 @@ function get_hit(
     end
 end
 
-## Hit computers for AD  Rays
-#"""
+## Tullio-based StableHitter
 
 function typemax(::Type{Tuple{Tuple{Float32,Float32},Int32}})
     return ((Inf32, Inf32), one(Int32))
@@ -79,6 +81,15 @@ function hit_argmin(i_T, r::FastRay)::Tuple{Float32,Int32}
     return get_hit(i_T, r)[1:2]
 end
 
+function next_hit!(tracer, hitter::StableHitter, rays, n_tris::AbstractArray{X}) where {X}
+    tmp_view = @view hitter.tmp[1:length(rays)]
+    @tullio (min) tmp_view[i] = hit_argmin(n_tris[j], rays[i])
+    d_view = @view tracer.hit_idx[:]
+    d_view = reshape(d_view, length(d_view))
+    map!(x -> x[2], d_view, tmp_view)
+end
+
+## ExperimentalHitter
 
 function next_hit_kernel(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray{UInt64}, default ) where {X}
     # TODO: rename everything
@@ -128,6 +139,7 @@ function next_hit!(tracer, hitter::ExperimentalHitter, rays, n_tris)
     return
 end
 
+## ExperimentalHitter2
 
 function next_hit_kernel2(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray{UInt64}, default ) where {X}
     ray_idx = threadIdx().y + (blockIdx().x - 1) * blockDim().y
@@ -191,12 +203,4 @@ function next_hit!(tracer, hitter::ExperimentalHitter2, rays, n_tris)
     kernel(my_args...; blocks = blocks, threads = threads)
     tracer.hit_idx .= unsafe_decode.(hitter.tmp)
     return
-end
-
-function next_hit!(tracer, hitter::StableHitter, rays, n_tris::AbstractArray{X}) where {X}
-    tmp_view = @view hitter.tmp[1:length(rays)]
-    @tullio (min) tmp_view[i] = hit_argmin(n_tris[j], rays[i])
-    d_view = @view tracer.hit_idx[:]
-    d_view = reshape(d_view, length(d_view))
-    map!(x -> x[2], d_view, tmp_view)
 end
