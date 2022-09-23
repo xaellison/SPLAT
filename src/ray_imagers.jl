@@ -122,20 +122,24 @@ function atomic_spectrum_kernel(
     t = tris[idx]
     if n >= first_diffuse_index
         for (n_λ, λ) in enumerate(spectrum)
-            r = expand(adr, λ)
-            d, n, t = get_hit((n, t), r, unsafe = true)
-            # NOTE this r breaks convention of dir being zero for retired rays
-            r = FastRay(r.pos + r.dir * d, r.dir, r.ignore_tri)
-            u, v = tex_uv(r.pos, t)
+            for x in (-0.25f0, 0.25f0)
+                for y in (-0.25f0, 0.25f0)
+                    r = expand(adr, λ, adr.x + x, adr.y + y)
+                    d, n, t = get_hit((n, t), r, unsafe = true)
+                    # NOTE this r breaks convention of dir being zero for retired rays
+                    r = FastRay(r.pos + r.dir * d, r.dir, r.ignore_tri)
+                    u, v = tex_uv(r.pos, t)
 
-            if !isnan(u) && !isnan(v) && !isinf(u) && !isinf(v)
-                # it's theoretically possible u, v could come back as zero
-                w, h = size(tex)[1:2]
-                i = clamp(Int(ceil(u * w)), 1, w)
-                j = clamp(Int(ceil(v * h)), 1, h)
+                    if !isnan(u) && !isnan(v) && !isinf(u) && !isinf(v)
+                        # it's theoretically possible u, v could come back as zero
+                        w, h = size(tex)[1:2]
+                        i = clamp(Int(ceil(u * w)), 1, w)
+                        j = clamp(Int(ceil(v * h)), 1, h)
 
-                intensity = cosine_shading(r, t)
-                CUDA.@atomic tex[i, j, n_λ] += intensity
+                        intensity = cosine_shading(r, t)
+                        CUDA.@atomic tex[i, j, n_λ] += intensity
+                    end
+                end
             end
         end
     end

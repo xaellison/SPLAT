@@ -126,6 +126,11 @@ function expand(r::ADRay, λ::Float32)::FastRay
     return FastRay(r.pos + r.∂p∂λ * (λ - r.λ), r.dir + r.∂d∂λ * (λ - r.λ), r.ignore_tri)
 end
 
+
+function expand(r::ADRay, λ::Float32, x::Float32, y::Float32)::FastRay
+    return FastRay(p_expansion(r, λ, x, y), d_expansion(r, λ, x, y), r.ignore_tri)
+end
+
 function rand(::ℜ³)
     return ℜ³((rand(Float32, 3) .- 0.5) .* 2...)
 end

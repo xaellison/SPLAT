@@ -43,7 +43,7 @@ function main()
     cam = my_moving_camera()
 
 	lights = [
-		RectLight(ℜ³(0, 0, 8), ℜ³(0, 0, -1), ℜ³(1, 0, 0), ℜ³(0, 1, 0), height, width),
+		RectLight(ℜ³(0, 0, 8), ℜ³(0, 0, -1), ℜ³(1, 0, 0), ℜ³(0, 1, 0), height ÷ 2, width ÷ 2),
 	]
 
 	trace_kwargs = Dict{Symbol, Any}()
@@ -55,5 +55,6 @@ function main()
     RGB = Array(RGB)
     return reshape(RGB, (height, width))
 end
-@time RGB = main()
-image(RGB)
+main()
+RGB = main();
+#image(RGB)
