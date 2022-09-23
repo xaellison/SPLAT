@@ -33,7 +33,7 @@ function get_hit(i_S::Tuple{Int32,Sphere}, r::ADRay; kwargs...)
         return ((Inf32, Inf32), one(Int32), S)
     end
     t0 = distance_to_sphere(r.pos, r.dir, S)
-    t(λ) = distance_to_sphere(r.pos + (λ - r.λ) * r.pos′, r.dir + (λ - r.λ) * r.dir′, S)
+    t(λ) = distance_to_sphere(r.pos + (λ - r.λ) * r.∂p∂λ, r.dir + (λ - r.λ) * r.∂d∂λ, S)
     if isinf(t0)
         return ((Inf32, Inf32), one(Int32), S)
     end
@@ -60,17 +60,21 @@ function get_hit(
     i_T::Tuple{Int32,AbstractTri},
     r::ADRay;
     kwargs...,
-)::Tuple{Tuple{Float32,Float32},Int32,AbstractTri} where {AbstractTri}
+)::Tuple{Tuple{Float32,Float32,Float32,Float32},Int32,AbstractTri} where {AbstractTri}
     i, T = i_T
     # In the case of i = 1, the degenerate triangle, this will be NaN.
     # t0 = NaN fails d0 > 0 below, which properly gives us i = 1 back
     t0 = distance_to_plane(r, T)
-    t(λ) = distance_to_plane(r, T, λ)
-    p = r.pos + r.dir * t0
-    if in_triangle(p, T) && t0 > 0 && r.ignore_tri != i
-        return ((t0, ForwardDiff.derivative(t, r.λ)), i, T)
+    p0 = r.pos + r.dir * t0
+    if in_triangle(p0, T) && t0 > 0 && r.ignore_tri != i
+        return ((t0,
+                ForwardDiff.derivative(λ -> distance_to_plane(r, T, λ, r.x, r.y), r.λ),
+                ForwardDiff.derivative(x -> distance_to_plane(r, T, r.λ, x, r.y), r.x),
+                ForwardDiff.derivative(y -> distance_to_plane(r, T, r.λ, r.x, y), r.y),),
+                i,
+                T)
     else
-        return ((Inf32, Inf32), one(Int32), T)
+        return ((Inf32, Inf32, Inf32, Inf32), one(Int32), T)
     end
 end
 
@@ -78,45 +82,59 @@ end
 ## Ray evolvers
 
 
-function p(r, t, t′, λ::N) where {N}
-    r.pos + # origin constant
-    r.pos′ * (λ - r.λ) +  #origin linear
-    (r.dir + # direction constant
-     r.dir′ * (λ - r.λ)) * # ... plus direction linear
-    (t + t′ * (λ - r.λ)) # times constant + linear distance
+
+function next_p(r :: ADRay, t :: Float32, ∂t∂λ :: Float32, ∂t∂x :: Float32, ∂t∂y :: Float32, λ::N1, x::N2, y::N3) where {N1, N2, N3}
+    p_expansion(r, λ, x, y) +
+    d_expansion(r, λ, x, y) *
+    (t +
+    ∂t∂λ * (λ - r.λ) +
+    ∂t∂x * (x - r.x) +
+    ∂t∂y * (y - r.y)) # times constant + linear distance
 end
 
-function handle_optics(r, t, t′, i, N, n1::R1, n2::R2, rndm) where {R1,R2}
+function handle_optics(r, t, ∂t∂λ, i, N, n1::R1, n2::R2, rndm) where {R1,R2}
     refracts =
-        can_refract(r.dir, N(r.λ), n1(r.λ), n2(r.λ)) &&
-        rndm > reflectance(r.dir, N(r.λ), n1(r.λ), n2(r.λ))
+        can_refract(r.dir, N(r.λ, r.x, r.y), n1(r.λ), n2(r.λ)) &&
+        rndm > reflectance(r.dir, N(r.λ, r.x, r.y), n1(r.λ), n2(r.λ))
 
     if refracts
         return ADRay(
-            p(r, t, t′, r.λ),
-            ForwardDiff.derivative(λ -> p(r, t, t′, λ), r.λ),
-            refract(r.dir, N(r.λ), n1(r.λ), n2(r.λ)),
+            next_p(r, t, ∂t∂λ, 0.0f0, 0.0f0, r.λ, 0.0f0, 0.0f0),
+            ForwardDiff.derivative(λ -> next_p(r, t, ∂t∂λ, 0.0f0, 0.0f0, λ, 0.0f0, 0.0f0), r.λ),
+            zero(ℜ³),
+            zero(ℜ³),
+            refract(r.dir, N(r.λ, r.x, r.y), n1(r.λ), n2(r.λ)),
             ForwardDiff.derivative(
-                λ -> refract(r.dir + r.dir′ * (λ - r.λ), N(r.λ), n1(λ), n2(λ)),
+                λ -> refract(r.dir + r.∂d∂λ * (λ - r.λ), N(λ, r.x, r.y), n1(λ), n2(λ)),
                 r.λ,
             ),
+            zero(ℜ³),
+            zero(ℜ³),
             !r.in_medium,
             i,
             r.dest,
             r.λ,
+            0.0f0,
+            0.0f0,
             RAY_STATUS_ACTIVE,
         )
 
     else
         return ADRay(
-            p(r, t, t′, r.λ),
-            ForwardDiff.derivative(λ -> p(r, t, t′, λ), r.λ),
-            reflect(r.dir, N(r.λ)),
-            ForwardDiff.derivative(λ -> reflect(r.dir + r.dir′ * (λ - r.λ), N(λ)), r.λ),
+            next_p(r, t, ∂t∂λ, 0.0f0, 0.0f0, r.λ, 0.0f0, 0.0f0),
+            ForwardDiff.derivative(λ -> next_p(r, t, ∂t∂λ, 0.0f0, 0.0f0, λ, 0.0f0, 0.0f0), r.λ),
+            zero(ℜ³),
+            zero(ℜ³),
+            reflect(r.dir, N(r.λ, r.x, r.y)),
+            ForwardDiff.derivative(λ -> reflect(r.dir + r.∂d∂λ * (λ - r.λ), N(λ, r.x, r.y)), r.λ),
+            zero(ℜ³),
+            zero(ℜ³),
             r.in_medium,
             i,
             r.dest,
             r.λ,
+            0.0f0,
+            0.0f0,
             RAY_STATUS_ACTIVE,
         )
     end
@@ -126,7 +144,7 @@ function evolve_ray(r::ADRay, i, T, rndm, first_diffuse_index)::ADRay
     if r.status != RAY_STATUS_ACTIVE
         return r
     end
-    (t, t′), i, T = get_hit((i, T), r)
+    (t, ∂t∂λ, ∂t∂x, ∂t∂y), i, T = get_hit((i, T), r)
     if i >= first_diffuse_index
         # compute the position in the new triangle, set dir to zero
         return retire(r, RAY_STATUS_DIFFUSE)
@@ -135,12 +153,12 @@ function evolve_ray(r::ADRay, i, T, rndm, first_diffuse_index)::ADRay
         return retire(r, RAY_STATUS_INFINITY)
     end
 
-    N(λ) = optical_normal(T, p(r, t, t′, λ))
+    N(λ, x, y) = optical_normal(T, next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, λ, x, y))
     # TODO: replace glass/air with expansion terms
     if r.in_medium
-        return handle_optics(r, t, t′, i, N, glass, air, rndm)
+        return handle_optics(r, t, ∂t∂λ, i, N, glass, air, rndm)
     else
-        return handle_optics(r, t, t′, i, N, air, glass, rndm)
+        return handle_optics(r, t, ∂t∂λ, i, N, air, glass, rndm)
     end
 end
 

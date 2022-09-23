@@ -27,7 +27,23 @@ function camera_ray(camera, height, width, x, y, λ, dv)
         dv * 0.25f0 / max(height, width)
     dir = normalize(dir)
     idx = (y - 1) * height + x
-    return ADRay(camera.pos, zero(ℜ³), dir, zero(ℜ³), false, 1, idx, λ, RAY_STATUS_ACTIVE)
+    return ADRay(
+        camera.pos,
+        zero(ℜ³),
+        zero(ℜ³),
+        zero(ℜ³),
+        dir,
+        zero(ℜ³),
+        zero(ℜ³),
+        zero(ℜ³),
+        false,
+        1,
+        idx,
+        λ,
+        0.0f0,
+        0.0f0,
+        RAY_STATUS_ACTIVE,
+    )
 end
 
 
@@ -57,12 +73,18 @@ function rays_from_light(light::RectLight)
         return ADRay(
             origin,
             zero(ℜ³),
+            zero(ℜ³),
+            zero(ℜ³),
             dir,
+            zero(ℜ³),
+            zero(ℜ³),
             zero(ℜ³),
             false,
             1,
             0, # lights are forward tracing, dest not known ahead of time
             λ,
+            zero(Float32),
+            zero(Float32),
             RAY_STATUS_ACTIVE,
         )
     end

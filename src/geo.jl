@@ -35,13 +35,19 @@ abstract type AbstractRay end
 
 struct ADRay <: AbstractRay
     pos::ℜ³
-    pos′::ℜ³
+    ∂p∂λ::ℜ³
+    ∂p∂x::ℜ³
+    ∂p∂y::ℜ³
     dir::ℜ³
-    dir′::ℜ³
+    ∂d∂λ::ℜ³
+    ∂d∂x::ℜ³
+    ∂d∂y::ℜ³
     in_medium::Bool
     ignore_tri::Int
     dest::Int
     λ::Float32
+    x::Float32
+    y::Float32
     status::UInt8
 end
 
@@ -52,13 +58,19 @@ const RAY_STATUS_INFINITY = UInt8(2)
 function retire(ray::ADRay, status)
     return ADRay(
         ray.pos,
-        ray.pos′,
+        ray.∂p∂λ,
+        ray.∂p∂x,
+        ray.∂p∂y,
         ray.dir,
-        ray.dir′,
+        ray.∂d∂λ,
+        ray.∂d∂x,
+        ray.∂d∂y,
         ray.in_medium,
         ray.ignore_tri,
         ray.dest,
         ray.λ,
+        ray.x,
+        ray.y,
         status,
     )
 end
@@ -74,8 +86,23 @@ FastRay(adray::ADRay) = FastRay(adray.pos, adray.dir, adray.ignore_tri)
 Base.zero(::ℜ³) = ℜ³(0.0f0, 0.0f0, 0.0f0)
 
 Base.zero(::Type{FastRay}) = FastRay(zero(ℜ³), zero(ℜ³), 1)
-Base.zero(::Type{ADRay}) =
-    ADRay(zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³), false, 1, -1, 0.0f0, zero(UInt8))
+Base.zero(::Type{ADRay}) = ADRay(
+    zero(ℜ³),
+    zero(ℜ³),
+    zero(ℜ³),
+    zero(ℜ³),
+    zero(ℜ³),
+    zero(ℜ³),
+    zero(ℜ³),
+    zero(ℜ³),
+    false,
+    1,
+    -1,
+    zero(Float32),
+    zero(Float32),
+    zero(Float32),
+    zero(UInt8),
+)
 
 translate(t::Tri, v) = Tri(t[1], t[2] + v, t[3] + v, t[4] + v)
 translate(t::STri, v) = STri(t[1], t[2] + v, t[3] + v, t[4] + v, t[5], t[6], t[7])
@@ -96,7 +123,7 @@ rotate(t::FTri, R) = FTri(
 
 
 function expand(r::ADRay, λ::Float32)::FastRay
-    return FastRay(r.pos + r.pos′ * (λ - r.λ), r.dir + r.dir′ * (λ - r.λ), r.ignore_tri)
+    return FastRay(r.pos + r.∂p∂λ * (λ - r.λ), r.dir + r.∂d∂λ * (λ - r.λ), r.ignore_tri)
 end
 
 function rand(::ℜ³)
@@ -335,6 +362,20 @@ function rotation_matrix(axis, θ)
     return RotMatrix{3,Float32}(M)
 end
 
+function p_expansion(r, λ, x, y)
+    r.pos + # origin constant
+    r.∂p∂λ * (λ - r.λ) +  #origin linear
+    r.∂p∂x * (x - r.x) +  #origin linear
+    r.∂p∂y * (y - r.y)
+end
+
+function d_expansion(r, λ, x, y)
+    r.dir + # direction constant
+    r.∂d∂λ * (λ - r.λ) +# ... plus direction linear
+    r.∂d∂x * (x - r.x) +
+    r.∂d∂y * (y - r.y)
+ end
+
 function distance_to_sphere(r_pos, r_dir, s::Sphere)
     # schwartz inequality: radical can't be positive if radius = 0
     radical = dot(r_dir, r_pos - s.origin)^2 - (norm(r_pos - s.origin)^2 - s.radius^2)
@@ -365,8 +406,8 @@ function distance_to_plane(r, T)
     return distance_to_plane(r.pos, r.dir, T[2], T[1])
 end
 
-function distance_to_plane(r, T, λ)
-    distance_to_plane(r.pos + r.pos′ * (λ - r.λ), r.dir + r.dir′ * (λ - r.λ), T[2], T[1])
+function distance_to_plane(r, T, λ, x, y)
+    distance_to_plane(p_expansion(r, λ, x, y), d_expansion(r, λ, x, y), T[2], T[1])
 end
 
 function same_side(p1, p2, _a, _b)
