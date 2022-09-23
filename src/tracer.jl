@@ -92,49 +92,64 @@ function next_p(r :: ADRay, t :: Float32, ∂t∂λ :: Float32, ∂t∂x :: Floa
     ∂t∂y * (y - r.y)) # times constant + linear distance
 end
 
-function handle_optics(r, t, ∂t∂λ, i, N, n1::R1, n2::R2, rndm) where {R1,R2}
+function handle_optics(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, i, N, n1::F1, n2::F2, rndm) where {F1,F2}
     refracts =
         can_refract(r.dir, N(r.λ, r.x, r.y), n1(r.λ), n2(r.λ)) &&
         rndm > reflectance(r.dir, N(r.λ, r.x, r.y), n1(r.λ), n2(r.λ))
 
     if refracts
         return ADRay(
-            next_p(r, t, ∂t∂λ, 0.0f0, 0.0f0, r.λ, 0.0f0, 0.0f0),
-            ForwardDiff.derivative(λ -> next_p(r, t, ∂t∂λ, 0.0f0, 0.0f0, λ, 0.0f0, 0.0f0), r.λ),
+            next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, r.λ, r.x, r.y),
+            ForwardDiff.derivative(λ -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, λ, r.x, r.y), r.λ),
             zero(ℜ³),
             zero(ℜ³),
             refract(r.dir, N(r.λ, r.x, r.y), n1(r.λ), n2(r.λ)),
             ForwardDiff.derivative(
-                λ -> refract(r.dir + r.∂d∂λ * (λ - r.λ), N(λ, r.x, r.y), n1(λ), n2(λ)),
+                λ -> refract(d_expansion(r, λ, r.x, r.y), N(r.λ, r.x, r.y), n1(λ), n2(λ)),
                 r.λ,
             ),
-            zero(ℜ³),
-            zero(ℜ³),
+            ForwardDiff.derivative(
+                x -> refract(d_expansion(r, r.λ, x, r.y), N(r.λ, x, r.y), n1(r.λ), n2(r.λ)),
+                r.x,
+            ),
+            ForwardDiff.derivative(
+                y -> refract(d_expansion(r, r.λ, r.x, y), N(r.λ, r.x, y), n1(r.λ), n2(r.λ)),
+                r.x,
+            ),
             !r.in_medium,
             i,
             r.dest,
             r.λ,
-            0.0f0,
-            0.0f0,
+            r.x,
+            r.y,
             RAY_STATUS_ACTIVE,
         )
 
     else
         return ADRay(
-            next_p(r, t, ∂t∂λ, 0.0f0, 0.0f0, r.λ, 0.0f0, 0.0f0),
-            ForwardDiff.derivative(λ -> next_p(r, t, ∂t∂λ, 0.0f0, 0.0f0, λ, 0.0f0, 0.0f0), r.λ),
+            next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, r.λ, r.x, r.y),
+            ForwardDiff.derivative(λ -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, λ, r.x, r.y), r.λ),
             zero(ℜ³),
             zero(ℜ³),
             reflect(r.dir, N(r.λ, r.x, r.y)),
-            ForwardDiff.derivative(λ -> reflect(r.dir + r.∂d∂λ * (λ - r.λ), N(λ, r.x, r.y)), r.λ),
-            zero(ℜ³),
-            zero(ℜ³),
+            ForwardDiff.derivative(
+                λ -> reflect(d_expansion(r, λ, r.x, r.y), N(λ, r.x, r.y)),
+                r.λ,
+            ),
+            ForwardDiff.derivative(
+                x -> reflect(d_expansion(r, r.λ, x, r.y), N(r.λ, x, r.y)),
+                r.x,
+            ),
+            ForwardDiff.derivative(
+                y -> reflect(d_expansion(r, r.λ, r.x, y), N(r.λ, r.x, y)),
+                r.x,
+            ),
             r.in_medium,
             i,
             r.dest,
             r.λ,
-            0.0f0,
-            0.0f0,
+            r.x,
+            r.y,
             RAY_STATUS_ACTIVE,
         )
     end
@@ -156,9 +171,9 @@ function evolve_ray(r::ADRay, i, T, rndm, first_diffuse_index)::ADRay
     N(λ, x, y) = optical_normal(T, next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, λ, x, y))
     # TODO: replace glass/air with expansion terms
     if r.in_medium
-        return handle_optics(r, t, ∂t∂λ, i, N, glass, air, rndm)
+        return handle_optics(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, i, N, glass, air, rndm)
     else
-        return handle_optics(r, t, ∂t∂λ, i, N, air, glass, rndm)
+        return handle_optics(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, i, N, air, glass, rndm)
     end
 end
 

@@ -64,17 +64,17 @@ function rays_from_light(light::RectLight)
         # returns a rectangular cross-section, unidirectional light source
         center, dir, δ1, δ2, height, width =
             light.center, light.dir, light.dim1, light.dim2, light.res1, light.res2
-        origin =
+        origin(x, y) =
             center +
             δ1 * (x - height ÷ 2) / (height ÷ 2) +
             δ2 * (y - width ÷ 2) / (width ÷ 2) +
             cross(dv, δ1) ./ (height ÷ 2) +
             cross(dv, δ2) ./ (width ÷ 2)
         return ADRay(
-            origin,
+            origin(x, y),
             zero(ℜ³),
-            zero(ℜ³),
-            zero(ℜ³),
+            ForwardDiff.derivative(x -> origin(x, y), x),
+            ForwardDiff.derivative(y -> origin(x, y), y),
             dir,
             zero(ℜ³),
             zero(ℜ³),
@@ -83,8 +83,8 @@ function rays_from_light(light::RectLight)
             1,
             0, # lights are forward tracing, dest not known ahead of time
             λ,
-            zero(Float32),
-            zero(Float32),
+            x,
+            y,
             RAY_STATUS_ACTIVE,
         )
     end
