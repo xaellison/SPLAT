@@ -1,3 +1,7 @@
+"""
+Borrows logic for cuda quicksort to perform a partition using O(N) global swap
+"""
+
 using CUDA
 using ..CUDA: i32
 import CUDA.QuickSortImpl.cumsum!
@@ -20,7 +24,6 @@ function batch_partition(
     lt::F1,
     by::F2,
 ) where {F1,F2}
-    sync_threads()
     idx0 = lo + (blockIdx().x - 1i32) * blockDim().x + threadIdx().x
     @inbounds if idx0 <= hi
         val = values[idx0]
@@ -54,15 +57,14 @@ function batch_partition(
         N_hi = sums[end]
         N_lo = blockDim().x - N_hi
         if threadIdx().x <= N_lo
-            write_view = @view dest[write_floor[1]: write_floor[1] + N_lo]
+            write_view = @view dest[write_floor[1] + 1: write_floor[1] + 1 + N_lo]
             write_view[threadIdx().x] = swap[threadIdx().x]
         else
             c = write_ceil[1]
-            write_view = @view dest[c- sums[end]:c]
+            write_view = @view dest[c - sums[end] + 1:c + 1]
             write_view[threadIdx().x - N_lo] = swap[threadIdx().x]
         end
     end
-    sync_threads()
 end
 
 
@@ -119,25 +121,3 @@ end
 function partition(vals, pivot, lt, by)
     return partition(vals, pivot, 0, length(vals), false, lt, by)
 end
-
-function main()
-    CUDA.NVTX.@range "warmup" CUDA.@sync begin
-        c = CUDA.zeros(ADRay, 1_000_000)
-        c = retire.(c, CUDA.rand(UInt8, length(c)) .% 3)
-        partition(c, zero(ADRay), 0, length(c), false, isless, r -> r.status)
-    end
-    for N in [256^2, 512^2, 1024^2]
-        CUDA.NVTX.@range "test $(Int(sqrt(N)))^2" CUDA.@sync begin
-            c = CUDA.zeros(ADRay, N)
-            c = retire.(c, CUDA.rand(UInt8, length(c)) .% 3)
-            partition(c, zero(ADRay), 0, length(c), false, isless, r -> r.status)
-            c = CUDA.zeros(ADRay, N)
-            c = retire.(c, CUDA.rand(UInt8, length(c)) .% 3)
-            partition(c, zero(ADRay), 0, length(c), false, isless, r -> r.status)
-
-        end
-    end
-end
-
-
-main()
