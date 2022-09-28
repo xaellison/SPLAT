@@ -10,12 +10,12 @@ function main()
 	# Tracing params
     width = 1024
     height = 1024
-    dλ = 12.50f0
+    dλ = 25f0
     λ_min = 400.0f0
     λ_max = 700.0f0
     depth = 3
     ITERS = 1
-	upscale = 16
+	upscale = 4
 	# Geometry
 
 	obj_path = "objs/icos.obj"
@@ -49,7 +49,7 @@ function main()
 	trace_kwargs = Dict{Symbol, Any}()
 	@pack! trace_kwargs = cam, lights, tex, tris, λ_min, dλ, λ_max
 	trace_kwargs = merge(basic_params, trace_kwargs)
-	array_kwargs = trace!(ExperimentalHitter, StableImager; trace_kwargs...)
+	array_kwargs = trace!(ExperimentalHitter, ExperimentalImager; trace_kwargs...)
 
 	@unpack RGB = array_kwargs
     RGB = Array(RGB)
