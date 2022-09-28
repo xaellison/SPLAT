@@ -15,7 +15,7 @@ function main()
     λ_max = 700.0f0
     depth = 3
     ITERS = 1
-
+	upscale = 16
 	# Geometry
 
 	obj_path = "objs/icos.obj"
@@ -26,10 +26,10 @@ function main()
 	tris = foldl(vcat, meshes)
 
 
-	tex = checkered_tex(32, 32, length(λ_min:dλ:λ_max)) .* 3
+	tex = checkered_tex(32, 32, length(λ_min:dλ:λ_max))# .* 3
 
 	basic_params = Dict{Symbol, Any}()
-	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse
+	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, upscale
 
     function my_moving_camera()
         camera_pos = ℜ³((0, 5, 5))
@@ -43,18 +43,18 @@ function main()
     cam = my_moving_camera()
 
 	lights = [
-		RectLight(ℜ³(0, 0, 8), ℜ³(0, 0, -1), ℜ³(1, 0, 0), ℜ³(0, 1, 0), height ÷ 4, width ÷ 4),
+		RectLight(ℜ³(0, 0, 8), ℜ³(0, 0, -1), ℜ³(1, 0, 0), ℜ³(0, 1, 0), height, width),
 	]
 
 	trace_kwargs = Dict{Symbol, Any}()
 	@pack! trace_kwargs = cam, lights, tex, tris, λ_min, dλ, λ_max
 	trace_kwargs = merge(basic_params, trace_kwargs)
-	array_kwargs = trace!(ExperimentalHitter; trace_kwargs...)
+	array_kwargs = trace!(ExperimentalHitter, StableImager; trace_kwargs...)
 
 	@unpack RGB = array_kwargs
     RGB = Array(RGB)
     return reshape(RGB, (height, width))
 end
 
-RGB = main();
-image(RGB)
+CUDA.NVTX.@range "warmup" main()
+CUDA.NVTX.@range "real" RGB = main();

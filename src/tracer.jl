@@ -208,6 +208,7 @@ function trace!(
     imager_type::Type{I};
     cam,
     lights,
+    upscale,
     tex,
     tris,
     λ_min,
@@ -220,9 +221,8 @@ function trace!(
 ) where {H<:AbstractHitter, I<:AbstractImager}
 
     # initialize rays for forward tracing
-    rays = rays_from_lights(lights)
+    rays = rays_from_lights(lights, upscale)
     hitter = H(CuArray, rays)
-    upscale = 4
     tracer = Tracer(CuArray, rays, upscale)
 
     spectrum, retina_factor = _spectrum_datastructs(CuArray, λ_min:dλ:λ_max)

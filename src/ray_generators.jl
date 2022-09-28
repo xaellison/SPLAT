@@ -59,12 +59,12 @@ function wrap_ray_gen(ray_generator, height, width)
     return rays
 end
 
-function rays_from_light(light::RectLight)
+function rays_from_light(light::RectLight, upscale)
 
     function rect_light_ray(x, y, λ, dv)
         # returns a rectangular cross-section, unidirectional light source
         center, dir, δ1, δ2, height, width =
-            light.center, light.dir, light.dim1, light.dim2, light.res1, light.res2
+            light.center, light.dir, light.dim1, light.dim2, light.res1 ÷ upscale, light.res2 ÷ upscale
         origin(x, y) =
             center +
             δ1 * (x - height ÷ 2) / (height ÷ 2) +
@@ -90,9 +90,9 @@ function rays_from_light(light::RectLight)
         )
     end
 
-    return wrap_ray_gen(rect_light_ray, light.res1, light.res2)
+    return wrap_ray_gen(rect_light_ray, light.res1 ÷ upscale, light.res2 ÷ upscale)
 end
 
-function rays_from_lights(lights::AbstractArray{T}) where {T<:AbstractLight}
-    return foldl(vcat, rays_from_light(light) for light in lights)
+function rays_from_lights(lights::AbstractArray{T}, upscale) where {T<:AbstractLight}
+    return foldl(vcat, rays_from_light(light, upscale) for light in lights)
 end
