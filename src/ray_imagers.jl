@@ -208,7 +208,6 @@ function continuum_light_map!(;
         tracer.δ,
         tex,
     )
-    synchronize()
 end
 
 function expansion_light_map!(;
@@ -248,7 +247,7 @@ function expansion_light_map!(;
 end
 
 
-function continuum_shade!(;
+function continuum_shade!(imager::StableImager;
     tracer,
     RGB3,
     RGB,

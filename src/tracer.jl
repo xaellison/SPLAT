@@ -1,9 +1,9 @@
 include("material.jl")
+include("utils.jl")
 include("ray_generators.jl")
 include("ray_imagers.jl")
 include("rgb_spectrum.jl")
 include("atomic_argmin.jl")
-include("utils.jl")
 include("hitters.jl")
 
 using ForwardDiff
@@ -204,7 +204,8 @@ function run_evolution!(;
 end
 
 function trace!(
-    hitter_type::Type{H};
+    hitter_type::Type{H},
+    imager_type::Type{I};
     cam,
     lights,
     tex,
@@ -216,7 +217,7 @@ function trace!(
     height,
     depth,
     first_diffuse,
-) where {H<:AbstractHitter}
+) where {H<:AbstractHitter, I<:AbstractImager}
 
     # initialize rays for forward tracing
     rays = rays_from_lights(lights)
@@ -264,6 +265,6 @@ function trace!(
         basic_params...,
         array_kwargs...,
     )
-    CUDA.@time continuum_shade!(; tracer = tracer, basic_params..., array_kwargs...)
+    CUDA.@time continuum_shade!(I(); tracer = tracer, basic_params..., array_kwargs...)
     return array_kwargs
 end

@@ -47,3 +47,7 @@ end
 upres(A, N::Int) = A(Float32(1):Float32(N)) ./ N .-0.5f0 .- (1.0f0 / (2.0f0 * N))
 
 Tracer(A, rays, N) = Tracer(A{Int32}(undef, length(rays)), A{Float32}(undef, length(rays)), upres(A, N))
+
+abstract type AbstractImager end
+
+struct StableImager <: AbstractImager end
