@@ -221,7 +221,8 @@ function trace!(
     # initialize rays for forward tracing
     rays = rays_from_lights(lights)
     hitter = H(CuArray, rays)
-    tracer = Tracer(CuArray, rays)
+    upscale = 4
+    tracer = Tracer(CuArray, rays, upscale)
 
     spectrum, retina_factor = _spectrum_datastructs(CuArray, λ_min:dλ:λ_max)
 
@@ -247,11 +248,11 @@ function trace!(
     RGB3 .= 0
     RGB = CuArray{RGBf}(undef, width * height)
 
-    ray_generator(x, y, λ, dv) = camera_ray(cam, height ÷ 2, width ÷ 2, x, y, λ, dv)
-    rays = wrap_ray_gen(ray_generator, height ÷ 2, width ÷ 2)
+    ray_generator(x, y, λ, dv) = camera_ray(cam, height ÷ upscale, width ÷ upscale, x, y, λ, dv)
+    rays = wrap_ray_gen(ray_generator, height ÷ upscale, width ÷ upscale)
 
     hitter = H(CuArray, rays)
-    tracer = Tracer(CuArray, rays)
+    tracer = Tracer(CuArray, rays, upscale)
     array_kwargs = Dict{Symbol,Any}()
 
     @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor, RGB3, RGB

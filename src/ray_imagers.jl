@@ -114,6 +114,8 @@ function atomic_spectrum_kernel(
     tris,
     first_diffuse_index,
     spectrum,
+    δx,
+    δy,
     tex,
 )
     idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
@@ -122,8 +124,9 @@ function atomic_spectrum_kernel(
     t = tris[idx]
     if n >= first_diffuse_index
         for (n_λ, λ) in enumerate(spectrum)
-            for x in (-0.25f0, 0.25f0)
-                for y in (-0.25f0, 0.25f0)
+            # TODO generalize wrt Tracer
+            for x in δx
+                for y in δy
                     r = expand(adr, λ, adr.x + x, adr.y + y)
                     d, n, t = get_hit((n, t), r, unsafe = true)
                     # NOTE this r breaks convention of dir being zero for retired rays
@@ -201,6 +204,8 @@ function continuum_light_map!(;
         tri_view,
         first_diffuse,
         spectrum,
+        tracer.δ,
+        tracer.δ,
         tex,
     )
     synchronize()
@@ -266,15 +271,16 @@ function continuum_shade!(;
     # TODO don't alloc on fly - change made as micro-opt to avoid allocs
     i_Λ = CuArray(1:length(spectrum)) |> a -> reshape(a, size(spectrum))
     s(args...) = shade_tex(args..., tex)
-    δx = CuArray(-0.25f0:0.5f0:0.25f0) |> a -> reshape(a, (1, 1, 1, length(a)))
-    δy = CuArray(-0.25f0:0.5f0:0.25f0) |> a -> reshape(a, (1, 1, 1, 1, length(a)))
+    δx = tracer.δ |> a -> reshape(a, (1, 1, 1, length(a)))
+    δy = tracer.δ |> a -> reshape(a, (1, 1, 1, 1, length(a)))
     broadcast = @~ s.(rays, tracer.hit_idx, tri_view, first_diffuse, spectrum, δx, δy, i_Λ) .*
        retina_factor .* intensity .* dλ
     # broadcast rule not implemeted for sum!
     # WARNING this next line is ~90% of pure_sphere runtime at res=1024^2
-    summation = sum(broadcast, dims = 3) |> a -> reshape(a, (width ÷ 2, height ÷ 2, 3, 2, 2)) |> a -> permutedims(a, (4, 1, 5, 2, 3)) |> a -> reshape(a, length(RGB3) ÷ 3, 3)
-    @info size(summation)
-    @info size(RGB3)
+    summation = sum(broadcast, dims = 3)
+    summation = summation |> a -> reshape(a, (width ÷ length(δx), height ÷ length(δy), 3, length(δx), length(δx)))
+    summation = summation |> a -> permutedims(a, (4, 1, 5, 2, 3))
+    summation = summation |> a -> reshape(a, length(RGB3) ÷ 3, 3)
     RGB3 .= summation
 
     map!(brightness -> clamp(brightness, 0, 1), RGB3, RGB3)

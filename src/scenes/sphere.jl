@@ -8,8 +8,8 @@ include("../procedural_assets.jl")
 
 function main()
 	# Tracing params
-    width = 512
-    height = 512
+    width = 1024
+    height = 1024
     dλ = 12.50f0
     λ_min = 400.0f0
     λ_max = 700.0f0
@@ -26,7 +26,7 @@ function main()
 	tris = foldl(vcat, meshes)
 
 
-	tex = checkered_tex(32, 32, length(λ_min:dλ:λ_max))
+	tex = checkered_tex(32, 32, length(λ_min:dλ:λ_max)) .* 3
 
 	basic_params = Dict{Symbol, Any}()
 	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse
@@ -43,7 +43,7 @@ function main()
     cam = my_moving_camera()
 
 	lights = [
-		RectLight(ℜ³(0, 0, 8), ℜ³(0, 0, -1), ℜ³(1, 0, 0), ℜ³(0, 1, 0), height ÷ 2, width ÷ 2),
+		RectLight(ℜ³(0, 0, 8), ℜ³(0, 0, -1), ℜ³(1, 0, 0), ℜ³(0, 1, 0), height ÷ 4, width ÷ 4),
 	]
 
 	trace_kwargs = Dict{Symbol, Any}()
@@ -55,6 +55,6 @@ function main()
     RGB = Array(RGB)
     return reshape(RGB, (height, width))
 end
-main()
+
 RGB = main();
-#image(RGB)
+image(RGB)
