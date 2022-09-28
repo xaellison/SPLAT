@@ -101,8 +101,8 @@ function handle_optics(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, i, N, n1::F1, n2::F2
         return ADRay(
             next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, r.λ, r.x, r.y),
             ForwardDiff.derivative(λ -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, λ, r.x, r.y), r.λ),
-            zero(ℜ³),
-            zero(ℜ³),
+            ForwardDiff.derivative(x -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, r.λ, x, r.y), r.x),
+            ForwardDiff.derivative(y -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, r.λ, r.x, y), r.y),
             refract(r.dir, N(r.λ, r.x, r.y), n1(r.λ), n2(r.λ)),
             ForwardDiff.derivative(
                 λ -> refract(d_expansion(r, λ, r.x, r.y), N(r.λ, r.x, r.y), n1(λ), n2(λ)),
@@ -129,8 +129,8 @@ function handle_optics(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, i, N, n1::F1, n2::F2
         return ADRay(
             next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, r.λ, r.x, r.y),
             ForwardDiff.derivative(λ -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, λ, r.x, r.y), r.λ),
-            zero(ℜ³),
-            zero(ℜ³),
+            ForwardDiff.derivative(x -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, r.λ, x, r.y), r.x),
+            ForwardDiff.derivative(y -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, r.λ, r.x, y), r.y),
             reflect(r.dir, N(r.λ, r.x, r.y)),
             ForwardDiff.derivative(
                 λ -> reflect(d_expansion(r, λ, r.x, r.y), N(λ, r.x, r.y)),
@@ -247,8 +247,8 @@ function trace!(
     RGB3 .= 0
     RGB = CuArray{RGBf}(undef, width * height)
 
-    ray_generator(x, y, λ, dv) = camera_ray(cam, height, width, x, y, λ, dv)
-    rays = wrap_ray_gen(ray_generator, height, width)
+    ray_generator(x, y, λ, dv) = camera_ray(cam, height ÷ 2, width ÷ 2, x, y, λ, dv)
+    rays = wrap_ray_gen(ray_generator, height ÷ 2, width ÷ 2)
 
     hitter = H(CuArray, rays)
     tracer = Tracer(CuArray, rays)

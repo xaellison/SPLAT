@@ -256,6 +256,8 @@ function continuum_shade!(;
     intensity = 7.0f-2,
     dλ,
     tex,
+    width,
+    height,
     kwargs...,
 )
     RGB3 .= 0.0f0
@@ -270,8 +272,10 @@ function continuum_shade!(;
        retina_factor .* intensity .* dλ
     # broadcast rule not implemeted for sum!
     # WARNING this next line is ~90% of pure_sphere runtime at res=1024^2
-    summation = sum(broadcast, dims = (3, 4, 5))
-    RGB3 .+= summation |> a -> reshape(a, length(rays), 3)
+    summation = sum(broadcast, dims = 3) |> a -> reshape(a, (width ÷ 2, height ÷ 2, 3, 2, 2)) |> a -> permutedims(a, (4, 1, 5, 2, 3)) |> a -> reshape(a, length(RGB3) ÷ 3, 3)
+    @info size(summation)
+    @info size(RGB3)
+    RGB3 .= summation
 
     map!(brightness -> clamp(brightness, 0, 1), RGB3, RGB3)
 

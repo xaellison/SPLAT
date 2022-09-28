@@ -25,7 +25,7 @@ function camera_ray(camera, height, width, x, y, λ, dv)
         return _x * camera.right +
                _y * camera.up +
                _z * camera.dir +
-               dv * 0.25f0 / max(height, width)
+               dv * 0.00025f0 / max(height, width)
    end
     idx = (y - 1) * height + x
     return ADRay(
