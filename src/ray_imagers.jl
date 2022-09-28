@@ -81,13 +81,13 @@ function shade_tex(
     n,
     t,
     first_diffuse_index,
-    λ,
+    λ, δx, δy,
     i_λ,
     tex::AbstractArray{Float32},
 )::Float32
     # NB disregards in_medium
     # evolve to hit a diffuse surface
-    r = expand(adr, λ)
+    r = expand(adr, λ, δx, δy)
     d, n, t = get_hit((n, t), r, unsafe = true)
     # WARNING inconsistent ray defined
     r = FastRay(r.pos + r.dir * d, r.dir, r.ignore_tri)
@@ -264,12 +264,14 @@ function continuum_shade!(;
     # TODO don't alloc on fly - change made as micro-opt to avoid allocs
     i_Λ = CuArray(1:length(spectrum)) |> a -> reshape(a, size(spectrum))
     s(args...) = shade_tex(args..., tex)
-
-    broadcast = @~ s.(rays, tracer.hit_idx, tri_view, first_diffuse, spectrum, i_Λ) .*
+    δx = CuArray(-0.25f0:0.5f0:0.25f0) |> a -> reshape(a, (1, 1, 1, length(a)))
+    δy = CuArray(-0.25f0:0.5f0:0.25f0) |> a -> reshape(a, (1, 1, 1, 1, length(a)))
+    broadcast = @~ s.(rays, tracer.hit_idx, tri_view, first_diffuse, spectrum, δx, δy, i_Λ) .*
        retina_factor .* intensity .* dλ
     # broadcast rule not implemeted for sum!
     # WARNING this next line is ~90% of pure_sphere runtime at res=1024^2
-    RGB3 .+= sum(broadcast, dims = 3) |> a -> reshape(a, length(rays), 3)
+    summation = sum(broadcast, dims = (3, 4, 5))
+    RGB3 .+= summation |> a -> reshape(a, length(rays), 3)
 
     map!(brightness -> clamp(brightness, 0, 1), RGB3, RGB3)
 

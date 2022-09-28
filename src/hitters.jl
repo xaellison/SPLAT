@@ -69,7 +69,6 @@ function next_hit!(tracer, hitter::ExperimentalHitter, rays, n_tris)
     kernel = @cuda launch = false next_hit_kernel(my_args...)
     hitter.tmp .= typemax(UInt64)
     get_shmem(threads) = threads * sizeof(Tuple{Int32,Tri})
-    # TODO: this is running <= 50% occupancy. Need to put a cap on shmem smaller than block
     config = launch_configuration(kernel.fun, shmem = threads -> get_shmem(threads))
     threads = 1 << exponent(config.threads)
     @assert length(rays) % threads == 0

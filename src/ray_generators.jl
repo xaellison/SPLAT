@@ -14,28 +14,29 @@ end
 # Functions that generate rays: camera + light sources
 
 function camera_ray(camera, height, width, x, y, λ, dv)
-    _x, _y = x - height / 2, y - width / 2
-    scale = height * _COS_45 / camera.FOV_half_sin
-    _x /= scale
-    _y /= scale
 
-    _z = sqrt(1 - _x^2 - _y^2)
-    dir =
-        _x * camera.right +
-        _y * camera.up +
-        _z * camera.dir +
-        dv * 0.25f0 / max(height, width)
-    dir = normalize(dir)
+
+
+
+    dir(x, y, dv) = begin
+        scale = height * _COS_45 / camera.FOV_half_sin
+        _x, _y = (x - height / 2) / scale, (y - width / 2) / scale
+        _z = sqrt(1 - _x^2 - _y^2)
+        return _x * camera.right +
+               _y * camera.up +
+               _z * camera.dir +
+               dv * 0.25f0 / max(height, width)
+   end
     idx = (y - 1) * height + x
     return ADRay(
         camera.pos,
         zero(ℜ³),
         zero(ℜ³),
         zero(ℜ³),
-        dir,
+        dir(x, y, dv),
         zero(ℜ³),
-        zero(ℜ³),
-        zero(ℜ³),
+        ForwardDiff.derivative(x -> dir(x, y, dv), x),
+        ForwardDiff.derivative(y -> dir(x, y, dv), y),
         false,
         1,
         idx,
