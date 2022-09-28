@@ -1,4 +1,41 @@
 
+## Datastruct manipulation
+
+function final_evolution(r, i, t, ∂t∂λ, ∂t∂x, ∂t∂y)
+    return ADRay(
+        next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, r.λ, r.x, r.y),
+        ForwardDiff.derivative(λ -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, λ, r.x, r.y), r.λ),
+        ForwardDiff.derivative(x -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, r.λ, x, r.y), r.x),
+        ForwardDiff.derivative(y -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, r.λ, r.x, y), r.y),
+        zero(ℜ³),
+        zero(ℜ³),
+        zero(ℜ³),
+        zero(ℜ³),
+        r.in_medium,
+        i,
+        r.dest,
+        r.λ,
+        r.x,
+        r.y,
+        RAY_STATUS_DIFFUSE,
+    )
+end
+
+function final_evolution(r, i, T)
+    """
+    Evolves rays that are pointing at diffuse surfaces into an expansion of
+    the hit position in that surface. The resulting ray has no direction,
+    and cannot be evolved further.
+    """
+    if r.status == RAY_STATUS_DIFFUSE
+        (t, ∂t∂λ, ∂t∂x, ∂t∂y), i, T = get_hit((i, T), r)
+        return final_evolution(r, i, t, ∂t∂λ, ∂t∂x, ∂t∂y)
+    else
+        return r
+    end
+end
+
+
 ## Light mapping
 
 function atomic_spectrum_kernel(
@@ -149,7 +186,6 @@ end
 
 function shade_tex2(
     adr::ADRay,
-    n,
     t,
     first_diffuse_index,
     δx,
@@ -164,19 +200,16 @@ function shade_tex2(
     for i_λ in 1:length(Λ)
         λ = Λ[i_λ]
         r = expand(adr, λ, δx, δy)
-        d, n, t = get_hit((n, t), r, unsafe = true)
-        # WARNING inconsistent ray defined
-        r = FastRay(r.pos + r.dir * d, r.dir, r.ignore_tri)
 
-        @inbounds if n >= first_diffuse_index
+        @inbounds if adr.status == RAY_STATUS_DIFFUSE
             # compute the position in the new triangle, set dir to zero
-            u, v = tex_uv(r.pos, t)
+            u, v = tex_uv(r, t)
 
             CUDA.@assert !isnan(u) && !isnan(v)
             # it's theoretically possible u, v could come back as zero
             i = clamp(Int(ceil(u * (size(tex)[1]))), 1, size(tex)[1])
             j = clamp(Int(ceil(v * (size(tex)[2]))), 1, size(tex)[2])
-            intensity = tex[i, j, i_λ] * cosine_shading(r, t)
+            intensity = tex[i, j, i_λ] #* cosine_shading(r, t)
             R = retina_factor[1, 1, i_λ] * intensity
             G = retina_factor[1, 2, i_λ] * intensity
             B = retina_factor[1, 3, i_λ] * intensity
@@ -204,6 +237,10 @@ function continuum_shade!(imager::ExperimentalImager;
     height,
     kwargs...,
 )
+    """
+    Uses shade_tex2 and final_evolution to refactor a final hit calculation
+    by a factor of (δx * δy * Λ) compared to StableImager
+    """
     RGB3 .= 0.0f0
     tri_view = @view tris[tracer.hit_idx]
     # putting tex in a Ref prevents it from being broadcast over
@@ -213,7 +250,8 @@ function continuum_shade!(imager::ExperimentalImager;
     δx = tracer.δ |> a -> reshape(a, (1, length(a)))
     δy = tracer.δ |> a -> reshape(a, (1, 1, length(a)))
     # TODO: remove alloc
-    upres_rgb = s.(rays, tracer.hit_idx, tri_view, first_diffuse, δx, δy)
+    rays2 = final_evolution.(rays, tracer.hit_idx, tri_view)
+    upres_rgb = s.(rays2, tri_view, first_diffuse, δx, δy)
     upres_rgb = reshape(upres_rgb, width ÷ length(δx), height ÷ length(δy), length(δx), length(δy))
     upres_rgb = permutedims(upres_rgb, (3, 1, 4, 2))
     upres_rgb = reshape(upres_rgb, size(RGB))
