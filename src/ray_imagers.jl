@@ -7,10 +7,10 @@ function final_evolution(r, i, t, ∂t∂λ, ∂t∂x, ∂t∂y)
         ForwardDiff.derivative(λ -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, λ, r.x, r.y), r.λ),
         ForwardDiff.derivative(x -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, r.λ, x, r.y), r.x),
         ForwardDiff.derivative(y -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, r.λ, r.x, y), r.y),
-        zero(ℜ³),
-        zero(ℜ³),
-        zero(ℜ³),
-        zero(ℜ³),
+        r.dir,
+        r.∂d∂λ,
+        r.∂d∂x,
+        r.∂d∂y,
         r.in_medium,
         i,
         r.dest,
@@ -24,8 +24,9 @@ end
 function final_evolution(r, i, T)
     """
     Evolves rays that are pointing at diffuse surfaces into an expansion of
-    the hit position in that surface. The resulting ray has no direction,
-    and cannot be evolved further.
+    the hit position in that surface. The resulting ray has the same direction
+    as went in, which is useful for shading. Further evolution is not well
+    defined.
     """
     if r.status == RAY_STATUS_DIFFUSE
         (t, ∂t∂λ, ∂t∂x, ∂t∂y), i, T = get_hit((i, T), r)
@@ -40,7 +41,6 @@ end
 
 function atomic_spectrum_kernel(
     rays::AbstractArray{ADRay},
-    hits,
     tris,
     first_diffuse_index,
     spectrum,
@@ -50,18 +50,14 @@ function atomic_spectrum_kernel(
 )
     idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     adr = rays[idx]
-    n = hits[idx]
     t = tris[idx]
-    if n >= first_diffuse_index
+    if adr.status == RAY_STATUS_DIFFUSE
         for (n_λ, λ) in enumerate(spectrum)
             # TODO generalize wrt Tracer
             for x in δx
                 for y in δy
                     r = expand(adr, λ, adr.x + x, adr.y + y)
-                    d, n, t = get_hit((n, t), r, unsafe = true)
-                    # NOTE this r breaks convention of dir being zero for retired rays
-                    r = FastRay(r.pos + r.dir * d, r.dir, r.ignore_tri)
-                    u, v = tex_uv(r.pos, t)
+                    u, v = tex_uv(r, t)
 
                     if !isnan(u) && !isnan(v) && !isinf(u) && !isinf(v)
                         # it's theoretically possible u, v could come back as zero
@@ -93,10 +89,10 @@ function continuum_light_map!(;
 )
     tri_view = @view tris[tracer.hit_idx]
     @assert length(rays) % 256 == 0
-
+    # TODO: remove alloc
+    rays2 = final_evolution.(rays, tracer.hit_idx, tri_view)
     @cuda blocks = length(rays) ÷ 256 threads = 256 atomic_spectrum_kernel(
-        rays,
-        tracer.hit_idx,
+        rays2,
         tri_view,
         first_diffuse,
         spectrum,
@@ -199,7 +195,7 @@ function shade_tex2(
     out = zero(RGBf)
     for i_λ in 1:length(Λ)
         λ = Λ[i_λ]
-        r = expand(adr, λ, δx, δy)
+        r = expand(adr, λ, adr.x + δx, adr.y + δy)
 
         @inbounds if adr.status == RAY_STATUS_DIFFUSE
             # compute the position in the new triangle, set dir to zero
