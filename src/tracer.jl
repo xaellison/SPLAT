@@ -5,6 +5,7 @@ include("ray_imagers.jl")
 include("rgb_spectrum.jl")
 include("atomic_argmin.jl")
 include("hitters.jl")
+include("partition.jl")
 
 using ForwardDiff
 using Makie
@@ -179,12 +180,9 @@ end
 
 ## Wrap it all up
 
-function run_evolution!(;
+function run_evolution!(
     hitter::AbstractHitter,
-    tracer::Tracer,
-    height::Int,
-    width::Int,
-    dλ,
+    tracer::Tracer;
     depth,
     first_diffuse,
     n_tris,
@@ -193,6 +191,7 @@ function run_evolution!(;
     kwargs...,
 ) where {T}
     for iter = 1:depth
+        @info count(r->r.status==RAY_STATUS_ACTIVE, rays)
         next_hit!(tracer, hitter, rays, n_tris)
         # evolve rays optically
         rand!(tracer.rndm)
@@ -203,7 +202,50 @@ function run_evolution!(;
     return
 end
 
+using Random
+
+function run_evolution!(
+    hitter::AbstractHitter,
+    tracer::ExperimentalTracer;
+    depth,
+    first_diffuse,
+    n_tris,
+    tris,
+    rays,
+    reorder=false,
+    kwargs...,
+) where {T}
+    cap = length(rays)
+    ray_view = @view rays[1:cap]
+    for iter = 1:depth
+        ray_view = @view rays[1:cap]
+
+        next_hit!(tracer, hitter, ray_view, n_tris)
+        # evolve rays optically
+        rand!(tracer.rndm)
+        tri_view = @view tris[tracer.hit_idx]
+        # everything has to be a view of the same size to avoid allocs + be sort safe
+        rays .= evolve_ray.(rays, tracer.hit_idx, tri_view, tracer.rndm, first_diffuse)
+        
+        cap = partition!(rays, tracer.ray_swap; by=r->r.status!=RAY_STATUS_ACTIVE)
+        if cap % 512 != 0
+            # TODO - I think this lazy math is inefficient
+            cap = min(length(rays), ((cap ÷ 512) + 1) * 512)
+        end
+    end
+    if reorder
+        indices = map(r->r.dest, rays)
+        tracer.ray_swap .= rays
+        @info "reordering"
+        rays[indices] .= tracer.ray_swap
+    end
+    # needed to realign hit_idx
+    next_hit!(tracer, hitter, rays, n_tris)
+    return
+end
+
 function trace!(
+    tracer_type::Type{T},
     hitter_type::Type{H},
     imager_type::Type{I};
     cam,
@@ -218,12 +260,14 @@ function trace!(
     height,
     depth,
     first_diffuse,
-) where {H<:AbstractHitter, I<:AbstractImager}
+) where {T<:AbstractTracer,
+         H<:AbstractHitter,
+         I<:AbstractImager}
 
     # initialize rays for forward tracing
     rays = rays_from_lights(lights, upscale)
     hitter = H(CuArray, rays)
-    tracer = Tracer(CuArray, rays, upscale)
+    tracer = T(CuArray, rays, upscale)
 
     spectrum, retina_factor = _spectrum_datastructs(CuArray, λ_min:dλ:λ_max)
 
@@ -236,9 +280,9 @@ function trace!(
     @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor
 
     array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
-    CUDA.@time run_evolution!(;
-        hitter = hitter,
-        tracer = tracer,
+    CUDA.@time run_evolution!(
+        hitter,
+        tracer;
         basic_params...,
         array_kwargs...,
     )
@@ -253,15 +297,16 @@ function trace!(
     rays = wrap_ray_gen(ray_generator, height ÷ upscale, width ÷ upscale)
 
     hitter = H(CuArray, rays)
-    tracer = Tracer(CuArray, rays, upscale)
+    tracer = T(CuArray, rays, upscale)
     array_kwargs = Dict{Symbol,Any}()
 
-    @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor, RGB3, RGB
+    @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor, RGB3, RGB, rays
     array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
 
-    CUDA.@time run_evolution!(;
-        hitter = hitter,
-        tracer = tracer,
+    CUDA.@time run_evolution!(
+        hitter,
+        tracer;
+        reorder=true,
         basic_params...,
         array_kwargs...,
     )

@@ -7,17 +7,16 @@ include("../tracer.jl")
 include("../procedural_assets.jl")
 
 function main()
-	for frame in (collect(1:9:180))
-	R = rotation_matrix(ℜ³(0, 0, 1), 2 * pi * (frame - 20) / 180)
+	for frame in (collect(1:5))
+	R = rotation_matrix(ℜ³(0, 0, 1), 2 * pi * (frame - 40) / 360)
 	# Tracing params
-    width = 128
-    height = 128
-    dλ = 6.25f0
+    width = 1024
+    height = 1024
+    dλ = 12.5f0
     λ_min = 400.0f0
     λ_max = 700.0f0
     depth = 5
-    ITERS = 1
-
+	upscale = 2
 	# Geometry
 
 	lobe1 = mesh_to_FTri(load("objs/lobe1.obj"))
@@ -31,20 +30,20 @@ function main()
 	tris = foldl(vcat, meshes)
 
 	Λ = CuArray(collect(λ_min:dλ:λ_max))
-	tex = CUDA.zeros(Float32, 512, 512, length(Λ))
+	tex = CUDA.zeros(Float32, 1024, 1024, length(Λ))
 
 	basic_params = Dict{Symbol, Any}()
-	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse
+	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, upscale
 
 	# Forward Trace light map
 
 	#ray_generator(x, y, λ, dv) = simple_light(ℜ³(0, 1, 0), ℜ³(0, -1, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(1, 0, 0) * 0.3, height, width, x, y, λ, dv)
 
 	lights = [
-		RectLight(ℜ³(1, 0, 0), ℜ³(-1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, 128, 128),
-		RectLight(ℜ³(-1, 0, 0), ℜ³(1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, 128, 128),
-		RectLight(ℜ³(0, 0, 1), ℜ³(0, 0, -1), ℜ³(0, 1, 0) * 0.3, ℜ³(1, 0, 0) * 0.3, 128, 128),
-		RectLight(ℜ³(0, 0, -1), ℜ³(0, 0, 1), ℜ³(0, 1, 0) * 0.3, ℜ³(1, 0, 0) * 0.3, 128, 128),
+		RectLight(ℜ³(1, 0, 0), ℜ³(-1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, 1024, 1024),
+		RectLight(ℜ³(-1, 0, 0), ℜ³(1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, 1024, 1024),
+		RectLight(ℜ³(0, 0, 1), ℜ³(0, 0, -1), ℜ³(0, 1, 0) * 0.3, ℜ³(1, 0, 0) * 0.3, 1024, 1024),
+		RectLight(ℜ³(0, 0, -1), ℜ³(0, 0, 1), ℜ³(0, 1, 0) * 0.3, ℜ³(1, 0, 0) * 0.3, 1024, 1024),
 	]
 
 	function my_moving_camera()
@@ -62,7 +61,7 @@ function main()
 	@pack! trace_kwargs = cam, lights, tex, tris, λ_min, dλ, λ_max
 	trace_kwargs = merge(basic_params, trace_kwargs)
 
-	array_kwargs = trace!(StableHitter; trace_kwargs...)
+	array_kwargs = trace!(ExperimentalTracer, ExperimentalHitter, ExperimentalImager; trace_kwargs...)
 
 	@unpack RGB = array_kwargs
     RGB = Array(RGB)

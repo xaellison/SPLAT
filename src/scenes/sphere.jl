@@ -26,7 +26,7 @@ function main()
 	tris = foldl(vcat, meshes)
 
 
-	tex = checkered_tex(32, 32, length(λ_min:dλ:λ_max))# .* 3
+	tex = checkered_tex(32, 32, length(λ_min:dλ:λ_max)) .* 3
 
 	basic_params = Dict{Symbol, Any}()
 	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, upscale
@@ -49,12 +49,16 @@ function main()
 	trace_kwargs = Dict{Symbol, Any}()
 	@pack! trace_kwargs = cam, lights, tex, tris, λ_min, dλ, λ_max
 	trace_kwargs = merge(basic_params, trace_kwargs)
-	array_kwargs = trace!(ExperimentalHitter, ExperimentalImager; trace_kwargs...)
+	array_kwargs = trace!(ExperimentalTracer,
+						  ExperimentalHitter,
+						  ExperimentalImager; trace_kwargs...)
 
-	@unpack RGB = array_kwargs
-    RGB = Array(RGB)
-    return reshape(RGB, (height, width))
+#	@unpack RGB, viz_map = array_kwargs
+#    RGB = Array(RGB)
+    return array_kwargs#reshape(RGB, (height, width)), viz_map
 end
 
-CUDA.NVTX.@range "warmup" main()
-CUDA.NVTX.@range "real" RGB = main();
+CUDA.NVTX.@range "warmup" structs= main()
+CUDA.NVTX.@range "real1" RGB = main();
+CUDA.NVTX.@range "real2" RGB = main();
+#

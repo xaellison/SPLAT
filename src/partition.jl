@@ -5,7 +5,6 @@ Borrows logic for cuda quicksort to perform a partition using O(N) global swap
 using CUDA
 using ..CUDA: i32
 import CUDA.QuickSortImpl.cumsum!
-import CUDA.QuickSortImpl.flex_lt
 include("geo.jl")
 
 function batch_partition(
@@ -15,19 +14,17 @@ function batch_partition(
     atomic_ceil,
     write_floor,
     write_ceil,
-    pivot,
     swap,
     sums,
     lo,
     hi,
     parity,
-    lt::F1,
-    by::F2,
-) where {F1,F2}
+    by::F,
+) where {F}
     idx0 = lo + (blockIdx().x - 1i32) * blockDim().x + threadIdx().x
     @inbounds if idx0 <= hi
         val = values[idx0]
-        comparison = flex_lt(pivot, val, parity, lt, by)
+        comparison = by(val)
     end
 
     @inbounds if idx0 <= hi
@@ -73,51 +70,56 @@ function partition_batches_kernel(
     dest,
     atomic_floor,
     atomic_ceil,
-    pivot,
     lo,
     hi,
     parity,
-    lt::F1,
-    by::F2,
-) where {T,F1,F2}
+    by::F,
+) where {T,F}
     sums = CuDynamicSharedArray(Int, blockDim().x)
     swap = CuDynamicSharedArray(T, blockDim().x, sizeof(sums))
     write_floor = CuDynamicSharedArray(Int, 1, sizeof(sums) + sizeof(swap))
     write_ceil = CuDynamicSharedArray(Int, 1, sizeof(sums) + sizeof(swap) + sizeof(write_floor))
-    batch_partition(values, dest, atomic_floor, atomic_ceil, write_floor, write_ceil, pivot, swap, sums, lo, hi, parity, lt, by)
+    batch_partition(values, dest, atomic_floor, atomic_ceil, write_floor, write_ceil, swap, sums, lo, hi, parity, by)
     return
 end
 
-function partition(
-    vals::AbstractArray{T},
-    pivot,
-    lo,
-    hi,
-    parity,
-    lt::F1,
-    by::F2,
-) where {T,F1,F2}
-    L = hi - lo
-    block_dim = 256
 
+"""
+Copies all values, partitioned (sort of boolean values) from `vals` into `dest`
+
+Returns a length-1 CuArray containing the number of false values in the first
+half of `dest`
+"""
+function partition_copy!(
+    dest::AbstractArray{T},
+    vals::AbstractArray{T},
+    by::F,
+) where {T,F}
+    L = length(vals)
+    block_dim = 256
     atomic_ceil = CUDA.zeros(Int, 1)
     atomic_ceil .= L
     atomic_floor = CUDA.zeros(Int, 1)
-    dest = CUDA.zeros(eltype(vals), length(vals))
     @cuda(
         blocks = cld(L, block_dim),
         threads = block_dim,
         shmem = block_dim * (sizeof(Int) + sizeof(T)) + 2 * sizeof(Int),
-        partition_batches_kernel(vals, dest, atomic_floor, atomic_ceil, pivot, lo, hi, parity, lt, by)
+        partition_batches_kernel(vals, dest, atomic_floor, atomic_ceil, 0, L, false, by)
     )
-    synchronize()
-    @info atomic_floor
-    @info atomic_ceil
 
-    @info atomic_floor[1] + atomic_ceil[1]
-    return dest
+    return atomic_floor
 end
 
-function partition(vals, pivot, lt, by)
-    return partition(vals, pivot, 0, length(vals), false, lt, by)
+"""
+Partitions `vals` according to `by`, `lt`. Overwrites `swap` as scratch space.
+`swap` may be larger than `vals`.
+Returns an Integer, the number of false values in the first half of `vals`
+"""
+function partition!(vals, swap; by)
+    @info "entry 2"
+    partition_holder = partition_copy!(swap, vals, by)
+    vals .= @view swap[1:length(vals)]
+    partition = Array(partition_holder)[1]
+    # TODO - use unified memory
+    return partition
 end

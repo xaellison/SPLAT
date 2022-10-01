@@ -56,7 +56,7 @@ function atomic_spectrum_kernel(
             # TODO generalize wrt Tracer
             for x in δx
                 for y in δy
-                    r = expand(adr, λ, adr.x + x, adr.y + y)
+                    r = expand(adr, λ, adr.x + x + rand(Float32) / 4, adr.y + y + rand(Float32) / 4)
                     u, v = tex_uv(r, t)
 
                     if !isnan(u) && !isnan(v) && !isinf(u) && !isinf(v)
@@ -154,6 +154,7 @@ function continuum_shade!(imager::StableImager;
     height,
     kwargs...,
 )
+    @info "stable imager"
     RGB3 .= 0.0f0
     tri_view = @view tris[tracer.hit_idx]
     # putting tex in a Ref prevents it from being broadcast over
@@ -197,22 +198,22 @@ function shade_tex2(
         λ = Λ[i_λ]
         r = expand(adr, λ, adr.x + δx, adr.y + δy)
 
-        @inbounds if adr.status == RAY_STATUS_DIFFUSE
+        if adr.status == RAY_STATUS_DIFFUSE
             # compute the position in the new triangle, set dir to zero
             u, v = tex_uv(r, t)
-
-            CUDA.@assert !isnan(u) && !isnan(v)
-            # it's theoretically possible u, v could come back as zero
-            i = clamp(Int(ceil(u * (size(tex)[1]))), 1, size(tex)[1])
-            j = clamp(Int(ceil(v * (size(tex)[2]))), 1, size(tex)[2])
-            intensity = tex[i, j, i_λ] #* cosine_shading(r, t)
-            R = retina_factor[1, 1, i_λ] * intensity
-            G = retina_factor[1, 2, i_λ] * intensity
-            B = retina_factor[1, 3, i_λ] * intensity
-            out += RGBf(R, G, B)
+            if  !isnan(u) && !isnan(v)
+                # it's theoretically possible u, v could come back as zero
+                i = clamp(Int(ceil(u * (size(tex)[1]))), 1, size(tex)[1])
+                j = clamp(Int(ceil(v * (size(tex)[2]))), 1, size(tex)[2])
+                intensity = tex[i, j, i_λ] #* cosine_shading(r, t)
+                R = retina_factor[1, 1, i_λ] * intensity
+                G = retina_factor[1, 2, i_λ] * intensity
+                B = retina_factor[1, 3, i_λ] * intensity
+                out += RGBf(R, G, B)
+            end
         end
     end
-    out
+    RGBf(clamp(out.r, 0, 1), clamp(out.g, 0, 1), clamp(out.b, 0, 1))
 end
 
 
@@ -235,8 +236,9 @@ function continuum_shade!(imager::ExperimentalImager;
 )
     """
     Uses shade_tex2 and final_evolution to refactor a final hit calculation
-    by a factor of (δx * δy * Λ) compared to StableImager
+    by a factor of (δx * δy) compared to StableImager
     """
+    @info "exp imager"
     RGB3 .= 0.0f0
     tri_view = @view tris[tracer.hit_idx]
     # putting tex in a Ref prevents it from being broadcast over

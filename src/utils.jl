@@ -36,17 +36,30 @@ ExperimentalHitter2(A, rays) = ExperimentalHitter2(A{UInt64}(undef, size(rays)))
 
 
 
-#abstract type AbstractForwardTracer end
+abstract type AbstractTracer end
 
-struct Tracer
+struct Tracer <: AbstractTracer
     hit_idx::AbstractArray{Int32}
     rndm::AbstractArray{Float32}
+    δ
+end
+
+struct ExperimentalTracer <: AbstractTracer
+    hit_idx::AbstractArray{Int32}
+    rndm::AbstractArray{Float32}
+    ray_swap::AbstractArray{ADRay}
     δ
 end
 
 upres(N::Int) = (Float32(1):Float32(N)) ./ N .-0.5f0 .- (1.0f0 / (2.0f0 * N))
 
 Tracer(A, rays, N) = Tracer(A{Int32}(undef, length(rays)), A{Float32}(undef, length(rays)), upres(N))
+
+ExperimentalTracer(A, rays, N) = ExperimentalTracer(A{Int32}(undef, length(rays)),
+                                                    A{Float32}(undef, length(rays)),
+                                                    similar(rays),
+                                                    upres(N))
+
 
 abstract type AbstractImager end
 

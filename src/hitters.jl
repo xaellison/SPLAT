@@ -22,6 +22,7 @@ function hit_argmin(i_T, r::FastRay)::Tuple{Float32,Int32}
 end
 
 function next_hit!(tracer, hitter::StableHitter, rays, n_tris::AbstractArray{X}) where {X}
+    @info "stable hitter"
     tmp_view = @view hitter.tmp[1:length(rays)]
     @tullio (min) tmp_view[i] = hit_argmin(n_tris[j], rays[i])
     d_view = @view tracer.hit_idx[:]
@@ -64,9 +65,12 @@ end
 
 function next_hit!(tracer, hitter::ExperimentalHitter, rays, n_tris)
     # fuzzy req: length(rays) should = 0 mod 128/256/512
-    my_args = rays, n_tris, hitter.tmp, Int32(1)
+    @info "exp hitter"
+    tmp_view = @view hitter.tmp[1:length(rays)]
+    my_args = rays, n_tris, tmp_view, Int32(1)
 
     kernel = @cuda launch = false next_hit_kernel(my_args...)
+    # TODO - apply ray view length to atomic argmin ops
     hitter.tmp .= typemax(UInt64)
     get_shmem(threads) = threads * sizeof(Tuple{Int32,Tri})
     config = launch_configuration(kernel.fun, shmem = threads -> get_shmem(threads))
@@ -74,7 +78,9 @@ function next_hit!(tracer, hitter::ExperimentalHitter, rays, n_tris)
     @assert length(rays) % threads == 0
     blocks = (cld(length(rays), threads), cld(length(n_tris), threads))
     kernel(my_args...; blocks = blocks, threads = threads, shmem = get_shmem(threads))
-    tracer.hit_idx .= unsafe_decode.(hitter.tmp)
+    dest_view = @view tracer.hit_idx[1:length(rays)]
+    src_view = @view hitter.tmp[1:length(rays)]
+    dest_view .= unsafe_decode.(src_view)
     return
 end
 
