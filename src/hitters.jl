@@ -22,7 +22,6 @@ function hit_argmin(i_T, r::FastRay)::Tuple{Float32,Int32}
 end
 
 function next_hit!(tracer, hitter::StableHitter, rays, n_tris::AbstractArray{X}) where {X}
-    @info "stable hitter"
     tmp_view = @view hitter.tmp[1:length(rays)]
     @tullio (min) tmp_view[i] = hit_argmin(n_tris[j], rays[i])
     d_view = @view tracer.hit_idx[:]
@@ -65,7 +64,6 @@ end
 
 function next_hit!(tracer, hitter::ExperimentalHitter, rays, n_tris)
     # fuzzy req: length(rays) should = 0 mod 128/256/512
-    @info "exp hitter"
     tmp_view = @view hitter.tmp[1:length(rays)]
     my_args = rays, n_tris, tmp_view, Int32(1)
 

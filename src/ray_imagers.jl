@@ -56,7 +56,7 @@ function atomic_spectrum_kernel(
             # TODO generalize wrt Tracer
             for x in δx
                 for y in δy
-                    r = expand(adr, λ, adr.x + x + rand(Float32) / 4, adr.y + y + rand(Float32) / 4)
+                    r = expand(adr, λ, adr.x + x, adr.y + y)
                     u, v = tex_uv(r, t)
 
                     if !isnan(u) && !isnan(v) && !isinf(u) && !isinf(v)
@@ -90,9 +90,9 @@ function continuum_light_map!(;
     tri_view = @view tris[tracer.hit_idx]
     @assert length(rays) % 256 == 0
     # TODO: remove alloc
-    rays2 = final_evolution.(rays, tracer.hit_idx, tri_view)
+    tracer.ray_swap .= final_evolution.(rays, tracer.hit_idx, tri_view)
     @cuda blocks = length(rays) ÷ 256 threads = 256 atomic_spectrum_kernel(
-        rays2,
+        tracer.ray_swap,
         tri_view,
         first_diffuse,
         spectrum,
@@ -106,8 +106,8 @@ end
 
 function shade_tex(
     adr::ADRay,
-    n,
-    t,
+    i,
+    T,
     first_diffuse_index,
     λ, δx, δy,
     i_λ,
@@ -116,21 +116,21 @@ function shade_tex(
     # NB disregards in_medium
     # evolve to hit a diffuse surface
     r = expand(adr, λ, δx, δy)
-    d, n, t = get_hit((n, t), r, unsafe = true)
+    t, i, T = get_hit((i, T), r, unsafe = true)
     # WARNING inconsistent ray defined
-    r = FastRay(r.pos + r.dir * d, r.dir, r.ignore_tri)
+    r = FastRay(r.pos + r.dir * t, r.dir, r.ignore_tri)
 
-    @inbounds if n >= first_diffuse_index
+    @inbounds if i >= first_diffuse_index
         # compute the position in the new triangle, set dir to zero
-        u, v = tex_uv(r.pos, t)
+        u, v = tex_uv(r.pos, T)
 
         CUDA.@assert !isnan(u) && !isnan(v)
         # it's theoretically possible u, v could come back as zero
         i = clamp(Int(ceil(u * (size(tex)[1]))), 1, size(tex)[1])
         j = clamp(Int(ceil(v * (size(tex)[2]))), 1, size(tex)[2])
-        return tex[i, j, i_λ] * cosine_shading(r, t)
+        return tex[i, j, i_λ] * cosine_shading(r, Ts)
     end
-    if isinf(d)
+    if isinf(t)
         return 0.0f0
     end
     return 0.0f0
@@ -183,7 +183,7 @@ end
 
 function shade_tex2(
     adr::ADRay,
-    t,
+    T,
     first_diffuse_index,
     δx,
     δy,
@@ -200,12 +200,12 @@ function shade_tex2(
 
         if adr.status == RAY_STATUS_DIFFUSE
             # compute the position in the new triangle, set dir to zero
-            u, v = tex_uv(r, t)
+            u, v = tex_uv(r, T)
             if  !isnan(u) && !isnan(v)
                 # it's theoretically possible u, v could come back as zero
                 i = clamp(Int(ceil(u * (size(tex)[1]))), 1, size(tex)[1])
                 j = clamp(Int(ceil(v * (size(tex)[2]))), 1, size(tex)[2])
-                intensity = tex[i, j, i_λ] #* cosine_shading(r, t)
+                intensity = tex[i, j, i_λ] * cosine_shading(r, T)
                 R = retina_factor[1, 1, i_λ] * intensity
                 G = retina_factor[1, 2, i_λ] * intensity
                 B = retina_factor[1, 3, i_λ] * intensity
@@ -238,7 +238,6 @@ function continuum_shade!(imager::ExperimentalImager;
     Uses shade_tex2 and final_evolution to refactor a final hit calculation
     by a factor of (δx * δy) compared to StableImager
     """
-    @info "exp imager"
     RGB3 .= 0.0f0
     tri_view = @view tris[tracer.hit_idx]
     # putting tex in a Ref prevents it from being broadcast over
@@ -248,8 +247,8 @@ function continuum_shade!(imager::ExperimentalImager;
     δx = tracer.δ |> a -> reshape(a, (1, length(a)))
     δy = tracer.δ |> a -> reshape(a, (1, 1, length(a)))
     # TODO: remove alloc
-    rays2 = final_evolution.(rays, tracer.hit_idx, tri_view)
-    upres_rgb = s.(rays2, tri_view, first_diffuse, δx, δy)
+    tracer.ray_swap .= final_evolution.(rays, tracer.hit_idx, tri_view)
+    upres_rgb = s.(tracer.ray_swap, tri_view, first_diffuse, δx, δy)
     upres_rgb = reshape(upres_rgb, width ÷ length(δx), height ÷ length(δy), length(δx), length(δy))
     upres_rgb = permutedims(upres_rgb, (3, 1, 4, 2))
     upres_rgb = reshape(upres_rgb, size(RGB))

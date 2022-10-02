@@ -50,6 +50,7 @@ function batch_partition(
         write_floor[1] = CUDA.atomic_add!(pointer(atomic_floor, 1), blockDim().x - sums[end])
     end
     sync_threads()
+    overhang = gridDim().x * blockDim().x - hi
     @inbounds if idx0 <= hi
         N_hi = sums[end]
         N_lo = blockDim().x - N_hi
@@ -58,7 +59,7 @@ function batch_partition(
             write_view[threadIdx().x] = swap[threadIdx().x]
         else
             c = write_ceil[1]
-            write_view = @view dest[c - sums[end] + 1:c + 1]
+            write_view = @view dest[c - sums[end] + overhang + 1:c + 1]
             write_view[threadIdx().x - N_lo] = swap[threadIdx().x]
         end
     end
@@ -118,6 +119,8 @@ Returns an Integer, the number of false values in the first half of `vals`
 function partition!(vals, swap; by)
     @info "entry 2"
     partition_holder = partition_copy!(swap, vals, by)
+    # faster than .=
+    #copy!(vals, swap)
     vals .= @view swap[1:length(vals)]
     partition = Array(partition_holder)[1]
     # TODO - use unified memory

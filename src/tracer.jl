@@ -202,7 +202,6 @@ function run_evolution!(
     return
 end
 
-using Random
 
 function run_evolution!(
     hitter::AbstractHitter,
@@ -226,7 +225,7 @@ function run_evolution!(
         tri_view = @view tris[tracer.hit_idx]
         # everything has to be a view of the same size to avoid allocs + be sort safe
         rays .= evolve_ray.(rays, tracer.hit_idx, tri_view, tracer.rndm, first_diffuse)
-        
+
         cap = partition!(rays, tracer.ray_swap; by=r->r.status!=RAY_STATUS_ACTIVE)
         if cap % 512 != 0
             # TODO - I think this lazy math is inefficient
@@ -234,10 +233,14 @@ function run_evolution!(
         end
     end
     if reorder
-        indices = map(r->r.dest, rays)
-        tracer.ray_swap .= rays
         @info "reordering"
-        rays[indices] .= tracer.ray_swap
+
+        indices = map(r->r.dest, rays)
+
+        copy!(tracer.ray_swap, rays)
+        dest_view = @view rays[indices]
+        copy!(dest_view, tracer.ray_swap)
+
     end
     # needed to realign hit_idx
     next_hit!(tracer, hitter, rays, n_tris)
@@ -250,7 +253,8 @@ function trace!(
     imager_type::Type{I};
     cam,
     lights,
-    upscale,
+    forward_upscale,
+    backward_upscale,
     tex,
     tris,
     λ_min,
@@ -265,9 +269,9 @@ function trace!(
          I<:AbstractImager}
 
     # initialize rays for forward tracing
-    rays = rays_from_lights(lights, upscale)
+    rays = rays_from_lights(lights, forward_upscale)
     hitter = H(CuArray, rays)
-    tracer = T(CuArray, rays, upscale)
+    tracer = T(CuArray, rays, forward_upscale)
 
     spectrum, retina_factor = _spectrum_datastructs(CuArray, λ_min:dλ:λ_max)
 
@@ -293,11 +297,11 @@ function trace!(
     RGB3 .= 0
     RGB = CuArray{RGBf}(undef, width * height)
 
-    ray_generator(x, y, λ, dv) = camera_ray(cam, height ÷ upscale, width ÷ upscale, x, y, λ, dv)
-    rays = wrap_ray_gen(ray_generator, height ÷ upscale, width ÷ upscale)
+    ray_generator(x, y, λ, dv) = camera_ray(cam, height ÷ backward_upscale, width ÷ backward_upscale, x, y, λ, dv)
+    rays = wrap_ray_gen(ray_generator, height ÷ backward_upscale, width ÷ backward_upscale)
 
     hitter = H(CuArray, rays)
-    tracer = T(CuArray, rays, upscale)
+    tracer = T(CuArray, rays, backward_upscale)
     array_kwargs = Dict{Symbol,Any}()
 
     @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor, RGB3, RGB, rays
