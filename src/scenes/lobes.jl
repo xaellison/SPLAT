@@ -7,16 +7,17 @@ include("../tracer.jl")
 include("../procedural_assets.jl")
 
 function main()
-	for frame in (collect(1:5))
+	for frame in (collect(1:360))
 	R = rotation_matrix(ℜ³(0, 0, 1), 2 * pi * (frame - 40) / 360)
 	# Tracing params
-    width = 1024
-    height = 1024
-    dλ = 12.5f0
+    width = 2048
+    height = 2048
+    dλ = 25f0
     λ_min = 400.0f0
     λ_max = 700.0f0
     depth = 5
-	upscale = 2
+	forward_upscale = 2
+	backward_upscale = 2
 	# Geometry
 
 	lobe1 = mesh_to_FTri(load("objs/lobe1.obj"))
@@ -33,17 +34,17 @@ function main()
 	tex = CUDA.zeros(Float32, 1024, 1024, length(Λ))
 
 	basic_params = Dict{Symbol, Any}()
-	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, upscale
+	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, forward_upscale, backward_upscale
 
 	# Forward Trace light map
 
 	#ray_generator(x, y, λ, dv) = simple_light(ℜ³(0, 1, 0), ℜ³(0, -1, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(1, 0, 0) * 0.3, height, width, x, y, λ, dv)
 
 	lights = [
-		RectLight(ℜ³(1, 0, 0), ℜ³(-1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, 1024, 1024),
-		RectLight(ℜ³(-1, 0, 0), ℜ³(1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, 1024, 1024),
-		RectLight(ℜ³(0, 0, 1), ℜ³(0, 0, -1), ℜ³(0, 1, 0) * 0.3, ℜ³(1, 0, 0) * 0.3, 1024, 1024),
-		RectLight(ℜ³(0, 0, -1), ℜ³(0, 0, 1), ℜ³(0, 1, 0) * 0.3, ℜ³(1, 0, 0) * 0.3, 1024, 1024),
+		RectLight(ℜ³(1, 0, 0), ℜ³(-1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, 2048, 2048),
+		RectLight(ℜ³(-1, 0, 0), ℜ³(1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, 2048, 2048),
+		RectLight(ℜ³(0, 0, 1), ℜ³(0, 0, -1), ℜ³(0, 1, 0) * 0.3, ℜ³(1, 0, 0) * 0.3, 2048, 2048),
+		RectLight(ℜ³(0, 0, -1), ℜ³(0, 0, 1), ℜ³(0, 1, 0) * 0.3, ℜ³(1, 0, 0) * 0.3, 2048, 2048),
 	]
 
 	function my_moving_camera()

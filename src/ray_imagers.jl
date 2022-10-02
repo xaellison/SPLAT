@@ -128,7 +128,7 @@ function shade_tex(
         # it's theoretically possible u, v could come back as zero
         i = clamp(Int(ceil(u * (size(tex)[1]))), 1, size(tex)[1])
         j = clamp(Int(ceil(v * (size(tex)[2]))), 1, size(tex)[2])
-        return tex[i, j, i_λ] * cosine_shading(r, Ts)
+        return tex[i, j, i_λ] * cosine_shading(r, T)
     end
     if isinf(t)
         return 0.0f0
@@ -147,11 +147,11 @@ function continuum_shade!(imager::StableImager;
     spectrum,
     first_diffuse,
     retina_factor,
-    intensity = 7.0f-2,
     dλ,
     tex,
     width,
     height,
+    intensity = 1.0f0,
     kwargs...,
 )
     @info "stable imager"
@@ -163,8 +163,7 @@ function continuum_shade!(imager::StableImager;
     s(args...) = shade_tex(args..., tex)
     δx = tracer.δ |> a -> reshape(a, (1, 1, 1, length(a)))
     δy = tracer.δ |> a -> reshape(a, (1, 1, 1, 1, length(a)))
-    broadcast = @~ s.(rays, tracer.hit_idx, tri_view, first_diffuse, spectrum, δx, δy, i_Λ) .*
-       retina_factor .* intensity .* dλ
+    broadcast = @~ s.(rays, tracer.hit_idx, tri_view, first_diffuse, spectrum, δx, δy, i_Λ) .* retina_factor .* intensity
     # broadcast rule not implemeted for sum!
     # WARNING this next line is ~90% of pure_sphere runtime at res=1024^2
     summation = sum(broadcast, dims = 3)
@@ -185,6 +184,7 @@ function shade_tex2(
     adr::ADRay,
     T,
     first_diffuse_index,
+    intensity,
     δx,
     δy,
     Λ,
@@ -194,21 +194,21 @@ function shade_tex2(
     # NB disregards in_medium
     # evolve to hit a diffuse surface
     out = zero(RGBf)
-    for i_λ in 1:length(Λ)
+    if adr.status == RAY_STATUS_DIFFUSE
+        for i_λ in 1:length(Λ)
         λ = Λ[i_λ]
         r = expand(adr, λ, adr.x + δx, adr.y + δy)
 
-        if adr.status == RAY_STATUS_DIFFUSE
             # compute the position in the new triangle, set dir to zero
             u, v = tex_uv(r, T)
             if  !isnan(u) && !isnan(v)
                 # it's theoretically possible u, v could come back as zero
                 i = clamp(Int(ceil(u * (size(tex)[1]))), 1, size(tex)[1])
                 j = clamp(Int(ceil(v * (size(tex)[2]))), 1, size(tex)[2])
-                intensity = tex[i, j, i_λ] * cosine_shading(r, T)
-                R = retina_factor[1, 1, i_λ] * intensity
-                G = retina_factor[1, 2, i_λ] * intensity
-                B = retina_factor[1, 3, i_λ] * intensity
+                intensity_λ = intensity * tex[i, j, i_λ] * cosine_shading(r, T)
+                R = retina_factor[1, 1, i_λ] * intensity_λ
+                G = retina_factor[1, 2, i_λ] * intensity_λ
+                B = retina_factor[1, 3, i_λ] * intensity_λ
                 out += RGBf(R, G, B)
             end
         end
@@ -227,11 +227,11 @@ function continuum_shade!(imager::ExperimentalImager;
     spectrum,
     first_diffuse,
     retina_factor,
-    intensity = 7.0f-2,
     dλ,
     tex,
     width,
     height,
+    intensity=1.0f0,
     kwargs...,
 )
     """
@@ -240,18 +240,17 @@ function continuum_shade!(imager::ExperimentalImager;
     """
     RGB3 .= 0.0f0
     tri_view = @view tris[tracer.hit_idx]
-    # putting tex in a Ref prevents it from being broadcast over
-    # TODO don't alloc on fly - change made as micro-opt to avoid allocs
-
     s(args...) = shade_tex2(args..., spectrum, tex, retina_factor)
-    δx = tracer.δ |> a -> reshape(a, (1, length(a)))
-    δy = tracer.δ |> a -> reshape(a, (1, 1, length(a)))
-    # TODO: remove alloc
+    δx = tracer.δ |> a -> reshape(a, (length(a)))
+    δy = tracer.δ |> a -> reshape(a, (1, length(a)))
     tracer.ray_swap .= final_evolution.(rays, tracer.hit_idx, tri_view)
-    upres_rgb = s.(tracer.ray_swap, tri_view, first_diffuse, δx, δy)
+    R = length(rays)
+    # reshape so expansions are first dims, and put in a common block for better IO patterns
+    upres_rgb = s.(reshape(tracer.ray_swap, (1, 1, R)), reshape(tri_view, (1,1,R)), first_diffuse, intensity, δx, δy)
+    upres_rgb = permutedims(upres_rgb, (3, 1, 2))
+    # next 3 lines expand into final image
     upres_rgb = reshape(upres_rgb, width ÷ length(δx), height ÷ length(δy), length(δx), length(δy))
     upres_rgb = permutedims(upres_rgb, (3, 1, 4, 2))
     upres_rgb = reshape(upres_rgb, size(RGB))
     RGB .= upres_rgb
-
 end

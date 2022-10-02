@@ -217,6 +217,9 @@ function run_evolution!(
     cap = length(rays)
     ray_view = @view rays[1:cap]
     for iter = 1:depth
+        if cap == 0
+            break
+        end
         ray_view = @view rays[1:cap]
 
         next_hit!(tracer, hitter, ray_view, n_tris)
@@ -232,15 +235,15 @@ function run_evolution!(
             cap = min(length(rays), ((cap ÷ 512) + 1) * 512)
         end
     end
+    
     if reorder
-        @info "reordering"
-
         indices = map(r->r.dest, rays)
-
+        # `copy!` is faster but causes nvvprof to fail on windows
         copy!(tracer.ray_swap, rays)
+        #tracer.ray_swap .= rays
         dest_view = @view rays[indices]
         copy!(dest_view, tracer.ray_swap)
-
+        #dest_view .= tracer.ray_swap
     end
     # needed to realign hit_idx
     next_hit!(tracer, hitter, rays, n_tris)
@@ -264,6 +267,7 @@ function trace!(
     height,
     depth,
     first_diffuse,
+    intensity=1.0f0,
 ) where {T<:AbstractTracer,
          H<:AbstractHitter,
          I<:AbstractImager}
@@ -276,7 +280,7 @@ function trace!(
     spectrum, retina_factor = _spectrum_datastructs(CuArray, λ_min:dλ:λ_max)
 
     basic_params = Dict{Symbol,Any}()
-    @pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse
+    @pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, intensity
     n_tris = tuple.(Int32(1):Int32(length(tris)), tris) |> m -> reshape(m, 1, length(m))
 
     Λ = CuArray(collect(λ_min:dλ:λ_max))
@@ -284,13 +288,13 @@ function trace!(
     @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor
 
     array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
-    CUDA.@time run_evolution!(
+    run_evolution!(
         hitter,
         tracer;
         basic_params...,
         array_kwargs...,
     )
-    CUDA.@time continuum_light_map!(; tracer = tracer, basic_params..., array_kwargs...)
+    continuum_light_map!(; tracer = tracer, basic_params..., array_kwargs...)
 
     # reverse trace image
     RGB3 = CuArray{Float32}(undef, width * height, 3)
@@ -307,13 +311,13 @@ function trace!(
     @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor, RGB3, RGB, rays
     array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
 
-    CUDA.@time run_evolution!(
+    run_evolution!(
         hitter,
         tracer;
         reorder=true,
         basic_params...,
         array_kwargs...,
     )
-    CUDA.@time continuum_shade!(I(); tracer = tracer, basic_params..., array_kwargs...)
+    continuum_shade!(I(); tracer = tracer, basic_params..., array_kwargs...)
     return array_kwargs
 end

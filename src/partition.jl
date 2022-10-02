@@ -117,11 +117,10 @@ Partitions `vals` according to `by`, `lt`. Overwrites `swap` as scratch space.
 Returns an Integer, the number of false values in the first half of `vals`
 """
 function partition!(vals, swap; by)
-    @info "entry 2"
     partition_holder = partition_copy!(swap, vals, by)
     # faster than .=
-    #copy!(vals, swap)
-    vals .= @view swap[1:length(vals)]
+    copy!(vals, swap)
+    #vals .= @view swap[1:length(vals)]
     partition = Array(partition_holder)[1]
     # TODO - use unified memory
     return partition
