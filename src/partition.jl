@@ -119,8 +119,10 @@ Returns an Integer, the number of false values in the first half of `vals`
 function partition!(vals, swap; by)
     partition_holder = partition_copy!(swap, vals, by)
     # faster than .=
-    copy!(vals, swap)
-    #vals .= @view swap[1:length(vals)]
+    v =  @view swap[1:length(vals)]
+#    vals .= v
+    copy!(vals, v)
+    #vals .=
     partition = Array(partition_holder)[1]
     # TODO - use unified memory
     return partition

@@ -38,7 +38,7 @@ ExperimentalHitter2(A, rays) = ExperimentalHitter2(A{UInt64}(undef, size(rays)))
 
 abstract type AbstractTracer end
 
-struct Tracer <: AbstractTracer
+struct StableTracer <: AbstractTracer
     hit_idx::AbstractArray{Int32}
     rndm::AbstractArray{Float32}
     δ
@@ -53,7 +53,7 @@ end
 
 upres(N::Int) = (Float32(1):Float32(N)) ./ N .-0.5f0 .- (1.0f0 / (2.0f0 * N))
 
-Tracer(A, rays, N) = Tracer(A{Int32}(undef, length(rays)), A{Float32}(undef, length(rays)), upres(N))
+StableTracer(A, rays, N) = StableTracer(A{Int32}(undef, length(rays)), A{Float32}(undef, length(rays)), upres(N))
 
 ExperimentalTracer(A, rays, N) = ExperimentalTracer(A{Int32}(undef, length(rays)),
                                                     A{Float32}(undef, length(rays)),

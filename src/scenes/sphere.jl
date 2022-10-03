@@ -8,15 +8,15 @@ include("../procedural_assets.jl")
 
 function main()
 	# Tracing params
-    width = 1024
-    height = 1024
+    width = 512
+    height = 512
     dλ = 25f0
     λ_min = 400.0f0
     λ_max = 700.0f0
     depth = 3
     ITERS = 1
-	forward_upscale = 16
-	backward_upscale = 16
+	forward_upscale = 4
+		backward_upscale = 4
 	# Geometry
 
 	obj_path = "objs/icos.obj"
@@ -24,10 +24,10 @@ function main()
 
 	meshes = [[zero(FTri)], glass_sphere, stage()]
 	first_diffuse = 1 + 1 + length(glass_sphere)
-	tris = foldl(vcat, meshes)
+	tris = CuArray(foldl(vcat, meshes))
 
 
-	tex = checkered_tex(32, 32, length(λ_min:dλ:λ_max)) .* 2
+	tex_f() = checkered_tex(16, 16, length(λ_min:dλ:λ_max)) .* 12
 
 	basic_params = Dict{Symbol, Any}()
 	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, forward_upscale, backward_upscale
@@ -48,18 +48,38 @@ function main()
 	]
 
 	trace_kwargs = Dict{Symbol, Any}()
-	@pack! trace_kwargs = cam, lights, tex, tris, λ_min, dλ, λ_max
+	@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max
 	trace_kwargs = merge(basic_params, trace_kwargs)
-	CUDA.@time array_kwargs = trace!(ExperimentalTracer,
-						  ExperimentalHitter,
-						  ExperimentalImager; intensity=1.0f0, trace_kwargs...)
+	runme() = begin
+		array_kwargs = trace!(ExperimentalTracer,
+							  ExperimentalHitter,
+							  ExperimentalImager; intensity=1.0f0, trace_kwargs...)
 
-	@unpack RGB = array_kwargs
-    RGB = Array(RGB)
-    return reshape(RGB, (height, width))
+		@unpack RGB = array_kwargs
+	    return reshape(RGB, (height, width))
+	end
+
+
+	matrix = Array{RGBf}(undef, height, width)
+	fig, ax, hm = image(1:height, 1:width, matrix)
+
+
+	# we use `record` to show the resulting video in the docs.
+	# If one doesn't need to record a video, a normal loop works as well.
+	# Just don't forget to call `display(fig)` before the loop
+	# and without record, one needs to insert a yield to yield to the render task
+
+	hm[3] = runme()
+	display(fig)
+	@time for i in 1:400
+	#    events(hm).mouseposition |> println
+		tv = @view tris[2:first_diffuse-1]
+	    hm[3] = runme() # update data
+		oscillate(tv) = translate(tv, ℜ³(cos(i / 20) / 50, 0, 0))
+		tv .= oscillate.(tv)
+	    #sleep(0.005)
+	    yield()
+	end
+
 end
-
-CUDA.NVTX.@range "warmup" main()
-CUDA.NVTX.@range "real 1" main();
-CUDA.NVTX.@range "real 2" main();
-#
+main()

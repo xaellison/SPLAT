@@ -182,7 +182,7 @@ end
 
 function run_evolution!(
     hitter::AbstractHitter,
-    tracer::Tracer;
+    tracer::StableTracer;
     depth,
     first_diffuse,
     n_tris,
@@ -191,7 +191,6 @@ function run_evolution!(
     kwargs...,
 ) where {T}
     for iter = 1:depth
-        @info count(r->r.status==RAY_STATUS_ACTIVE, rays)
         next_hit!(tracer, hitter, rays, n_tris)
         # evolve rays optically
         rand!(tracer.rndm)
@@ -235,7 +234,7 @@ function run_evolution!(
             cap = min(length(rays), ((cap ÷ 512) + 1) * 512)
         end
     end
-    
+
     if reorder
         indices = map(r->r.dest, rays)
         # `copy!` is faster but causes nvvprof to fail on windows
@@ -258,7 +257,7 @@ function trace!(
     lights,
     forward_upscale,
     backward_upscale,
-    tex,
+    tex_f,
     tris,
     λ_min,
     dλ,
@@ -271,7 +270,7 @@ function trace!(
 ) where {T<:AbstractTracer,
          H<:AbstractHitter,
          I<:AbstractImager}
-
+    tex = tex_f()
     # initialize rays for forward tracing
     rays = rays_from_lights(lights, forward_upscale)
     hitter = H(CuArray, rays)

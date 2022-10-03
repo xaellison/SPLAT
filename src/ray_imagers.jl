@@ -53,7 +53,6 @@ function atomic_spectrum_kernel(
     t = tris[idx]
     if adr.status == RAY_STATUS_DIFFUSE
         for (n_λ, λ) in enumerate(spectrum)
-            # TODO generalize wrt Tracer
             for x in δx
                 for y in δy
                     r = expand(adr, λ, adr.x + x, adr.y + y)
@@ -90,9 +89,9 @@ function continuum_light_map!(;
     tri_view = @view tris[tracer.hit_idx]
     @assert length(rays) % 256 == 0
     # TODO: remove alloc
-    tracer.ray_swap .= final_evolution.(rays, tracer.hit_idx, tri_view)
+    rays .= final_evolution.(rays, tracer.hit_idx, tri_view)
     @cuda blocks = length(rays) ÷ 256 threads = 256 atomic_spectrum_kernel(
-        tracer.ray_swap,
+        rays,
         tri_view,
         first_diffuse,
         spectrum,
@@ -243,10 +242,10 @@ function continuum_shade!(imager::ExperimentalImager;
     s(args...) = shade_tex2(args..., spectrum, tex, retina_factor)
     δx = tracer.δ |> a -> reshape(a, (length(a)))
     δy = tracer.δ |> a -> reshape(a, (1, length(a)))
-    tracer.ray_swap .= final_evolution.(rays, tracer.hit_idx, tri_view)
+    rays .= final_evolution.(rays, tracer.hit_idx, tri_view)
     R = length(rays)
     # reshape so expansions are first dims, and put in a common block for better IO patterns
-    upres_rgb = s.(reshape(tracer.ray_swap, (1, 1, R)), reshape(tri_view, (1,1,R)), first_diffuse, intensity, δx, δy)
+    upres_rgb = s.(reshape(rays, (1, 1, R)), reshape(tri_view, (1,1,R)), first_diffuse, intensity, δx, δy)
     upres_rgb = permutedims(upres_rgb, (3, 1, 2))
     # next 3 lines expand into final image
     upres_rgb = reshape(upres_rgb, width ÷ length(δx), height ÷ length(δy), length(δx), length(δy))
