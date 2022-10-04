@@ -34,6 +34,11 @@ end
 
 ExperimentalHitter2(A, rays) = ExperimentalHitter2(A{UInt64}(undef, size(rays)))
 
+struct ExperimentalHitter3 <: AbstractHitter
+    tmp::AbstractArray{UInt64}
+end
+
+ExperimentalHitter3(A, rays) = ExperimentalHitter3(A{UInt64}(undef, size(rays)))
 
 
 abstract type AbstractTracer end

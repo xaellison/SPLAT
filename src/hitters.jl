@@ -145,3 +145,80 @@ function next_hit!(tracer, hitter::ExperimentalHitter2, rays, n_tris)
     tracer.hit_idx .= unsafe_decode.(hitter.tmp)
     return
 end
+
+
+## ExperimentalHitter3
+
+function next_hit_kernel3(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray{UInt64}, default) where {X}
+    shmem = CuDynamicSharedArray(Tuple{Int32, Tri}, blockDim().x)
+
+    ray_idx = threadIdx().x + (blockIdx().x - 1) * blockDim().x
+    tri_idx = threadIdx().x + (blockIdx().y - 1) * blockDim().x
+
+    # download data for warp
+    r = FastRay(rays[ray_idx])
+    arg_min = default
+    min_val = Inf32
+
+    i = zero(Int32)
+    T = Tri(zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³))
+    if tri_idx <= length(n_tris)
+        i, T = n_tris[tri_idx]
+    end
+
+    # time to shuffle rays
+
+    for warp_iter in 1:(blockDim().x ÷ 32)
+
+        shmem[threadIdx().x] = (i, T)
+        for shuffle in 1:32
+            t = distance_to_plane(r, T)
+            p = r.pos + r.dir * t
+            if i != 1 && in_triangle(p, T) && min_val > t > 0 && r.ignore_tri != i
+                arg_min = i
+                min_val = t
+            end
+            sync_warp()
+
+            arg_min = CUDA.shfl_sync(0xFFFFFFFF, arg_min, ((threadIdx().x) % 32 + 1))
+            min_val = CUDA.shfl_sync(0xFFFFFFFF, min_val, ((threadIdx().x) % 32 + 1))
+            p_x = CUDA.shfl_sync(0xFFFFFFFF, r.pos[1], ((threadIdx().x) % 32 + 1))
+            p_y = CUDA.shfl_sync(0xFFFFFFFF, r.pos[2], ((threadIdx().x) % 32 + 1))
+            p_z = CUDA.shfl_sync(0xFFFFFFFF, r.pos[3], ((threadIdx().x) % 32 + 1))
+            d_x = CUDA.shfl_sync(0xFFFFFFFF, r.dir[1], ((threadIdx().x) % 32 + 1))
+            d_y = CUDA.shfl_sync(0xFFFFFFFF, r.dir[2], ((threadIdx().x) % 32 + 1))
+            d_z = CUDA.shfl_sync(0xFFFFFFFF, r.dir[3], ((threadIdx().x) % 32 + 1))
+            ig = CUDA.shfl_sync(0xFFFFFFFF, r.ignore_tri, ((threadIdx().x) % 32 + 1))
+            r = FastRay(ℜ³(p_x, p_y, p_z), ℜ³(d_x, d_y, d_z), ig)
+        end
+        (i, T) = shmem[(threadIdx().x - 1 + 32) % blockDim().x + 1]
+        sync_threads()
+
+    end
+
+    # r should be its original value - upload
+    operand = unsafe_encode(min_val, UInt32(arg_min))
+    CUDA.@atomic dest[ray_idx] = min(dest[ray_idx], operand)
+    return nothing
+end
+
+
+function next_hit!(tracer, hitter::ExperimentalHitter3, rays, n_tris)
+    # fuzzy req: length(rays) should = 0 mod 128/256/512
+    my_args = rays, n_tris, hitter.tmp, Int32(1)
+    kernel = @cuda launch = false next_hit_kernel3(my_args...)
+    hitter.tmp .= typemax(UInt64)
+
+    get_shmem(threads) = threads * sizeof(Tuple{Int32,Tri})
+    config = launch_configuration(kernel.fun, shmem = threads -> get_shmem(threads))
+
+    thread_count = 1 << exponent(config.threads)
+    threads = config.threads
+    @assert length(rays) % threads == 0
+    # the totally confusing flip of xy for ray/tri at the block/grid level
+    # is to keep grid size within maximum but also tris along thread_x (warp)
+    blocks = (cld(length(rays), threads), cld(length(n_tris), threads))
+    kernel(my_args...; blocks = blocks, threads = threads, shmem = get_shmem(threads))
+    tracer.hit_idx .= unsafe_decode.(hitter.tmp)
+    return
+end
