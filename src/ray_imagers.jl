@@ -216,6 +216,55 @@ function shade_tex2(
 end
 
 
+# bilinear tex filter
+function shade_tex3(
+    adr::ADRay,
+    T,
+    first_diffuse_index,
+    intensity,
+    δx,
+    δy,
+    Λ,
+    tex::AbstractArray{Float32},
+    retina_factor
+)
+    # NB disregards in_medium
+    # evolve to hit a diffuse surface
+    out = zero(RGBf)
+    if adr.status == RAY_STATUS_DIFFUSE
+        for i_λ in 1:length(Λ)
+        λ = Λ[i_λ]
+        r = expand(adr, λ, adr.x + δx, adr.y + δy)
+
+            # compute the position in the new triangle, set dir to zero
+            _u, _v = tex_uv(r, T)
+            if  !isnan(_u) && !isnan(_v)
+                # it's theoretically possible u, v could come back as zero
+                u, v = _u * size(tex)[1], _v * size(tex)[2]
+                i₊ = clamp(Int(ceil(u)), 1, size(tex)[1])
+                j₊ = clamp(Int(ceil(v)), 1, size(tex)[2])
+                i₋ = clamp(Int(floor(u)), 1, size(tex)[1])
+                j₋ = clamp(Int(floor(v)), 1, size(tex)[2])
+                I₊₊ = intensity * tex[i₊, j₊, i_λ] * cosine_shading(r, T)
+                I₊₋ = intensity * tex[i₊, j₋, i_λ] * cosine_shading(r, T)
+                I₋₊ = intensity * tex[i₋, j₊, i_λ] * cosine_shading(r, T)
+                I₋₋ = intensity * tex[i₋, j₋, i_λ] * cosine_shading(r, T)
+                s₊₊ = abs((u - i₋) * (v - j₋))
+                s₊₋ = abs((u - i₋) * (v - j₊))
+                s₋₊ = abs((u - i₊) * (v - j₋))
+                s₋₋ = abs((u - i₊) * (v - j₊))
+
+                R = retina_factor[1, 1, i_λ] * (s₊₊ * I₊₊ + s₋₊ * I₋₊ + s₊₋ * I₊₋ + s₋₋ * I₋₋)
+                G = retina_factor[1, 2, i_λ] * (s₊₊ * I₊₊ + s₋₊ * I₋₊ + s₊₋ * I₊₋ + s₋₋ * I₋₋)
+                B = retina_factor[1, 3, i_λ] * (s₊₊ * I₊₊ + s₋₊ * I₋₊ + s₊₋ * I₊₋ + s₋₋ * I₋₋)
+                out += RGBf(R, G, B)
+            end
+        end
+    end
+    RGBf(clamp(out.r, 0, 1), clamp(out.g, 0, 1), clamp(out.b, 0, 1))
+end
+
+
 function continuum_shade!(imager::ExperimentalImager;
     tracer,
     RGB3,

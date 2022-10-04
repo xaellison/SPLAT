@@ -68,9 +68,10 @@ function rays_from_light(light::RectLight, upscale)
         origin(x, y) =
             center +
             δ1 * (x - height ÷ 2) / (height ÷ 2) +
-            δ2 * (y - width ÷ 2) / (width ÷ 2) +
-            cross(dv, δ1) ./ (height ÷ 2) +
-            cross(dv, δ2) ./ (width ÷ 2)
+            δ2 * (y - width ÷ 2) / (width ÷ 2)# +
+            #cross(dv, δ1) ./ (height ÷ 2) +
+            #cross(dv, δ2) ./ (width ÷ 2)
+            # ^ disabling noise for cosmetic reasons
         return ADRay(
             origin(x, y),
             zero(ℜ³),
@@ -94,5 +95,6 @@ function rays_from_light(light::RectLight, upscale)
 end
 
 function rays_from_lights(lights::AbstractArray{T}, upscale) where {T<:AbstractLight}
-    return foldl(vcat, rays_from_light(light, upscale) for light in lights)
+    ray_chunks = [rays_from_light(light, upscale) for light in lights]
+    return vcat(ray_chunks...)
 end

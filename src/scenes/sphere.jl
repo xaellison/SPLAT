@@ -16,7 +16,7 @@ function main()
     depth = 3
     ITERS = 1
 	forward_upscale = 4
-		backward_upscale = 4
+	backward_upscale = 4
 	# Geometry
 
 	obj_path = "objs/icos.obj"
@@ -50,13 +50,12 @@ function main()
 	trace_kwargs = Dict{Symbol, Any}()
 	@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max
 	trace_kwargs = merge(basic_params, trace_kwargs)
-	runme() = begin
-		array_kwargs = trace!(ExperimentalTracer,
+	runme(i) = begin
+		RGB= trace!(StableTracer,
 							  ExperimentalHitter,
-							  ExperimentalImager; intensity=1.0f0, trace_kwargs...)
+							  ExperimentalImager; intensity=1.0f0, force_rand=1f0, trace_kwargs...)
 
-		@unpack RGB = array_kwargs
-	    return reshape(RGB, (height, width))
+		return reshape(RGB, (height, width))
 	end
 
 
@@ -69,15 +68,19 @@ function main()
 	# Just don't forget to call `display(fig)` before the loop
 	# and without record, one needs to insert a yield to yield to the render task
 
-	hm[3] = runme()
+	# For nvvprof:
+	#CUDA.NVTX.@range "warmup" runme(1)
+	#CUDA.NVTX.@range "run 1" runme(1)
+	#CUDA.NVTX.@range "run 2" runme(1)
+
+	hm[3] = runme(1)
 	display(fig)
 	@time for i in 1:400
 	#    events(hm).mouseposition |> println
 		tv = @view tris[2:first_diffuse-1]
-	    hm[3] = runme() # update data
+	    hm[3] = runme(1) # update data
 		oscillate(tv) = translate(tv, ℜ³(cos(i / 20) / 50, 0, 0))
 		tv .= oscillate.(tv)
-	    #sleep(0.005)
 	    yield()
 	end
 

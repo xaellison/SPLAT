@@ -33,9 +33,12 @@ end
 
 function next_hit_kernel(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray{UInt64}, default ) where {X}
     # TODO: rename everything
-    shmem = @cuDynamicSharedMem(Tuple{Int32, Tri}, blockDim().x)
+    shmem = CuDynamicSharedArray(Tuple{Int32, Tri}, blockDim().x)
 
     dest_idx = threadIdx().x + (blockIdx().x - 1) * blockDim().x
+    if dest_idx > length(rays)
+        return
+    end
     r = rays[dest_idx]
 
     arg_min = default
@@ -44,40 +47,39 @@ function next_hit_kernel(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray
     if threadIdx().x + (blockIdx().y - 1) * blockDim().x <= length(n_tris)
         i, FT = n_tris[threadIdx().x + (blockIdx().y - 1) * blockDim().x]
         shmem[threadIdx().x] = i, Tri(FT[1], FT[2], FT[3], FT[4])
+    else
+        shmem[threadIdx().x] = 1, zero(Tri)
     end
     sync_threads()
-    for scan = 1:min(blockDim().x, length(n_tris) - (blockIdx().y - 1) * blockDim().x)
+    for scan = 1:blockDim().x
         i, T = shmem[scan]
         t = distance_to_plane(r, T)
         p = r.pos + r.dir * t
-        if in_triangle(p, T) && min_val > t > 0 && r.ignore_tri != i
+        if in_triangle(p, T) && min_val > t > 0 && r.ignore_tri != i && i != 1
             arg_min = i
             min_val = t
         end
     end
 
     operand = unsafe_encode(min_val, UInt32(arg_min))
-    dest[dest_idx] = min(dest[dest_idx], operand)
+    CUDA.@atomic dest[dest_idx] = min(dest[dest_idx], operand)
     return nothing
 end
 
 
 function next_hit!(tracer, hitter::ExperimentalHitter, rays, n_tris)
-    # fuzzy req: length(rays) should = 0 mod 128/256/512
     tmp_view = @view hitter.tmp[1:length(rays)]
     my_args = rays, n_tris, tmp_view, Int32(1)
 
     kernel = @cuda launch = false next_hit_kernel(my_args...)
-    # TODO - apply ray view length to atomic argmin ops
-    hitter.tmp .= typemax(UInt64)
+    src_view = @view hitter.tmp[1:length(rays)]
+    src_view .= typemax(UInt64)
     get_shmem(threads) = threads * sizeof(Tuple{Int32,Tri})
     config = launch_configuration(kernel.fun, shmem = threads -> get_shmem(threads))
     threads = 1 << exponent(config.threads)
-    @assert length(rays) % threads == 0
     blocks = (cld(length(rays), threads), cld(length(n_tris), threads))
     kernel(my_args...; blocks = blocks, threads = threads, shmem = get_shmem(threads))
     dest_view = @view tracer.hit_idx[1:length(rays)]
-    src_view = @view hitter.tmp[1:length(rays)]
     dest_view .= unsafe_decode.(src_view)
     return
 end

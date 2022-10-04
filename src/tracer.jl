@@ -188,12 +188,16 @@ function run_evolution!(
     n_tris,
     tris,
     rays,
+    force_rand=nothing,
     kwargs...,
 ) where {T}
     for iter = 1:depth
         next_hit!(tracer, hitter, rays, n_tris)
         # evolve rays optically
         rand!(tracer.rndm)
+        if !isnothing(force_rand)
+            tracer.rndm .= force_rand
+        end
         tri_view = @view tris[tracer.hit_idx]
         # everything has to be a view of the same size to avoid allocs + be sort safe
         rays .= evolve_ray.(rays, tracer.hit_idx, tri_view, tracer.rndm, first_diffuse)
@@ -211,6 +215,7 @@ function run_evolution!(
     tris,
     rays,
     reorder=false,
+    force_rand=nothing,
     kwargs...,
 ) where {T}
     cap = length(rays)
@@ -224,6 +229,9 @@ function run_evolution!(
         next_hit!(tracer, hitter, ray_view, n_tris)
         # evolve rays optically
         rand!(tracer.rndm)
+        if !isnothing(force_rand)
+            tracer.rndm .= force_rand
+        end
         tri_view = @view tris[tracer.hit_idx]
         # everything has to be a view of the same size to avoid allocs + be sort safe
         rays .= evolve_ray.(rays, tracer.hit_idx, tri_view, tracer.rndm, first_diffuse)
@@ -238,11 +246,11 @@ function run_evolution!(
     if reorder
         indices = map(r->r.dest, rays)
         # `copy!` is faster but causes nvvprof to fail on windows
-        copy!(tracer.ray_swap, rays)
-        #tracer.ray_swap .= rays
+        #copy!(tracer.ray_swap, rays)
+        tracer.ray_swap .= rays
         dest_view = @view rays[indices]
-        copy!(dest_view, tracer.ray_swap)
-        #dest_view .= tracer.ray_swap
+        #copy!(dest_view, tracer.ray_swap)
+        dest_view .= tracer.ray_swap
     end
     # needed to realign hit_idx
     next_hit!(tracer, hitter, rays, n_tris)
@@ -266,6 +274,7 @@ function trace!(
     height,
     depth,
     first_diffuse,
+    force_rand=nothing, # 0 to force reflection, 1 to force refraction
     intensity=1.0f0,
 ) where {T<:AbstractTracer,
          H<:AbstractHitter,
@@ -279,7 +288,7 @@ function trace!(
     spectrum, retina_factor = _spectrum_datastructs(CuArray, λ_min:dλ:λ_max)
 
     basic_params = Dict{Symbol,Any}()
-    @pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, intensity
+    @pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, intensity, force_rand
     n_tris = tuple.(Int32(1):Int32(length(tris)), tris) |> m -> reshape(m, 1, length(m))
 
     Λ = CuArray(collect(λ_min:dλ:λ_max))
@@ -318,5 +327,7 @@ function trace!(
         array_kwargs...,
     )
     continuum_shade!(I(); tracer = tracer, basic_params..., array_kwargs...)
-    return array_kwargs
+    @unpack RGB = array_kwargs
+    RGB = Array(RGB)
+    return RGB
 end
