@@ -36,9 +36,7 @@ function next_hit_kernel(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray
     shmem = CuDynamicSharedArray(Tuple{Int32, Tri}, blockDim().x)
 
     dest_idx = threadIdx().x + (blockIdx().x - 1) * blockDim().x
-    if dest_idx > length(rays)
-        return
-    end
+
     r = rays[dest_idx]
 
     arg_min = default
@@ -47,7 +45,7 @@ function next_hit_kernel(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray
     if threadIdx().x + (blockIdx().y - 1) * blockDim().x <= length(n_tris)
         shmem[threadIdx().x] = n_tris[threadIdx().x + (blockIdx().y - 1) * blockDim().x]
     else
-        shmem[threadIdx().x] = 1, zero(Tri)
+        shmem[threadIdx().x] = 1, Tri(zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³))
     end
     sync_threads()
     for scan = 1:blockDim().x
@@ -85,45 +83,47 @@ end
 
 ## ExperimentalHitter2
 
-function next_hit_kernel2(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray{UInt64}, default ) where {X}
-    ray_idx = threadIdx().y + (blockIdx().x - 1) * blockDim().y
+function next_hit_kernel2(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray{UInt64}, default) where {X}
+    ray_idx = threadIdx().x + (blockIdx().x - 1) * blockDim().x
     tri_idx = threadIdx().x + (blockIdx().y - 1) * blockDim().x
 
-    r = rays[ray_idx]
-
+    # download data for warp
+    r = FastRay(rays[ray_idx])
     arg_min = default
     min_val = Inf32
 
     i = zero(Int32)
     T = Tri(zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³))
     if tri_idx <= length(n_tris)
-        i, T = n_tris[tri_idx]#[1]
-    #    T = Tri(n_tris[tri_idx][2][1], n_tris[tri_idx][2][2], n_tris[tri_idx][2][3], n_tris[tri_idx][2][4])
-        #T = Tri(FT[1], FT[2], FT[3], FT[4])
+        i, T = n_tris[tri_idx]
     end
 
-    t = distance_to_plane(r, T)
-    p = r.pos + r.dir * t
-    if in_triangle(p, T) && min_val > t > 0 && r.ignore_tri != i
-        arg_min = i
-        min_val = t
-    end
+    # time to shuffle rays
 
-
-    for shuffle_step in 0:4
-        sync_warp()
-        neighbor_arg_min = shfl_down_sync(0xFFFFFFFF, arg_min, 1<<shuffle_step)
-        neighbor_min_val = shfl_down_sync(0xFFFFFFFF, min_val, 1<<shuffle_step)
-        if neighbor_min_val < min_val
-            arg_min = neighbor_arg_min
-            min_val = neighbor_min_val
+    for shuffle in 1:32
+        t = distance_to_plane(r, T)
+        p = r.pos + r.dir * t
+        if i != 1 && in_triangle(p, T) && min_val > t > 0 && r.ignore_tri != i
+            arg_min = i
+            min_val = t
         end
+        sync_warp()
+
+        arg_min = CUDA.shfl_sync(0xFFFFFFFF, arg_min, ((threadIdx().x) % 32 + 1))
+        min_val = CUDA.shfl_sync(0xFFFFFFFF, min_val, ((threadIdx().x) % 32 + 1))
+        p_x = CUDA.shfl_sync(0xFFFFFFFF, r.pos[1], ((threadIdx().x) % 32 + 1))
+        p_y = CUDA.shfl_sync(0xFFFFFFFF, r.pos[2], ((threadIdx().x) % 32 + 1))
+        p_z = CUDA.shfl_sync(0xFFFFFFFF, r.pos[3], ((threadIdx().x) % 32 + 1))
+        d_x = CUDA.shfl_sync(0xFFFFFFFF, r.dir[1], ((threadIdx().x) % 32 + 1))
+        d_y = CUDA.shfl_sync(0xFFFFFFFF, r.dir[2], ((threadIdx().x) % 32 + 1))
+        d_z = CUDA.shfl_sync(0xFFFFFFFF, r.dir[3], ((threadIdx().x) % 32 + 1))
+        ig = CUDA.shfl_sync(0xFFFFFFFF, r.ignore_tri, ((threadIdx().x) % 32 + 1))
+        r = FastRay(ℜ³(p_x, p_y, p_z), ℜ³(d_x, d_y, d_z), ig)
     end
 
-    if threadIdx().x == 1
-        operand = unsafe_encode(min_val, UInt32(arg_min))
-        CUDA.@atomic dest[ray_idx] = min(dest[ray_idx], operand)
-    end
+    # r should be its original value - upload
+    operand = unsafe_encode(min_val, UInt32(arg_min))
+    CUDA.@atomic dest[ray_idx] = min(dest[ray_idx], operand)
     return nothing
 end
 
@@ -131,17 +131,16 @@ end
 function next_hit!(tracer, hitter::ExperimentalHitter2, rays, n_tris)
     # fuzzy req: length(rays) should = 0 mod 128/256/512
     my_args = rays, n_tris, hitter.tmp, Int32(1)
-
     kernel = @cuda launch = false next_hit_kernel2(my_args...)
     hitter.tmp .= typemax(UInt64)
     # TODO: this is running <= 50% occupancy. Need to put a cap on shmem smaller than block
     config = launch_configuration(kernel.fun)
     thread_count = 1 << exponent(config.threads)
-    threads = (32, thread_count ÷ 32)
+    threads = 32
     #@assert length(rays) % threads == 0
     # the totally confusing flip of xy for ray/tri at the block/grid level
     # is to keep grid size within maximum but also tris along thread_x (warp)
-    blocks = (cld(length(rays), threads[2]), cld(length(n_tris), threads[1]))
+    blocks = (cld(length(rays), threads), cld(length(n_tris), threads))
     kernel(my_args...; blocks = blocks, threads = threads)
     tracer.hit_idx .= unsafe_decode.(hitter.tmp)
     return

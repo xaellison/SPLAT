@@ -52,7 +52,7 @@ function main()
 	trace_kwargs = merge(basic_params, trace_kwargs)
 	runme(i) = begin
 		RGB= trace!(StableTracer,
-							  ExperimentalHitter,
+							  ExperimentalHitter2,
 							  ExperimentalImager; intensity=1.0f0, force_rand=1f0, trace_kwargs...)
 
 		return reshape(RGB, (height, width))
@@ -69,10 +69,9 @@ function main()
 	# and without record, one needs to insert a yield to yield to the render task
 
 	# For nvvprof:
-	#CUDA.NVTX.@range "warmup" runme(1)
-	#CUDA.NVTX.@range "run 1" runme(1)
-	#CUDA.NVTX.@range "run 2" runme(1)
-
+#	CUDA.NVTX.@range "warmup" runme(1)
+#	CUDA.NVTX.@range "run 1" runme(1)
+#	CUDA.NVTX.@range "run 2" runme(1)
 	hm[3] = runme(1)
 	display(fig)
 	@time for i in 1:400
@@ -83,6 +82,5 @@ function main()
 		tv .= oscillate.(tv)
 	    yield()
 	end
-
 end
 main()
