@@ -17,6 +17,8 @@ const Tri = SVector{4,ℜ³}
 const STri = SVector{7,ℜ³}
 const FTri = SVector{10,ℜ³}
 
+tri_from_ftri(ftri) = Tri(ftri[1], ftri[2], ftri[3], ftri[4])
+
 struct Sphere
     origin::ℜ³
     radius::Float32

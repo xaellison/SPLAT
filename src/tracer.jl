@@ -289,7 +289,7 @@ function trace!(
 
     basic_params = Dict{Symbol,Any}()
     @pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, intensity, force_rand
-    n_tris = tuple.(Int32(1):Int32(length(tris)), tris) |> m -> reshape(m, 1, length(m))
+    n_tris = tuple.(Int32(1):Int32(length(tris)), map(tri_from_ftri, tris)) |> m -> reshape(m, 1, length(m))
 
     Λ = CuArray(collect(λ_min:dλ:λ_max))
     array_kwargs = Dict{Symbol,Any}()

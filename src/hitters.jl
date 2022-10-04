@@ -45,8 +45,7 @@ function next_hit_kernel(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray
     min_val = Inf32
 
     if threadIdx().x + (blockIdx().y - 1) * blockDim().x <= length(n_tris)
-        i, FT = n_tris[threadIdx().x + (blockIdx().y - 1) * blockDim().x]
-        shmem[threadIdx().x] = i, Tri(FT[1], FT[2], FT[3], FT[4])
+        shmem[threadIdx().x] = n_tris[threadIdx().x + (blockIdx().y - 1) * blockDim().x]
     else
         shmem[threadIdx().x] = 1, zero(Tri)
     end
@@ -98,9 +97,9 @@ function next_hit_kernel2(rays, n_tris :: AbstractArray{X}, dest :: AbstractArra
     i = zero(Int32)
     T = Tri(zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³))
     if tri_idx <= length(n_tris)
-        i, FT = n_tris[tri_idx]#[1]
+        i, T = n_tris[tri_idx]#[1]
     #    T = Tri(n_tris[tri_idx][2][1], n_tris[tri_idx][2][2], n_tris[tri_idx][2][3], n_tris[tri_idx][2][4])
-        T = Tri(FT[1], FT[2], FT[3], FT[4])
+        #T = Tri(FT[1], FT[2], FT[3], FT[4])
     end
 
     t = distance_to_plane(r, T)
@@ -134,13 +133,11 @@ function next_hit!(tracer, hitter::ExperimentalHitter2, rays, n_tris)
     my_args = rays, n_tris, hitter.tmp, Int32(1)
 
     kernel = @cuda launch = false next_hit_kernel2(my_args...)
-    @info "registers =  $(CUDA.registers(kernel))"
     hitter.tmp .= typemax(UInt64)
     # TODO: this is running <= 50% occupancy. Need to put a cap on shmem smaller than block
     config = launch_configuration(kernel.fun)
     thread_count = 1 << exponent(config.threads)
     threads = (32, thread_count ÷ 32)
-    @info "block size = $threads"
     #@assert length(rays) % threads == 0
     # the totally confusing flip of xy for ray/tri at the block/grid level
     # is to keep grid size within maximum but also tris along thread_x (warp)
