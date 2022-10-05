@@ -198,6 +198,8 @@ function run_evolution!(
         if !isnothing(force_rand)
             tracer.rndm .= force_rand
         end
+
+        # NOTE: this triggers a D2H memcpy & gap in compute usage
         tri_view = @view tris[tracer.hit_idx]
         # everything has to be a view of the same size to avoid allocs + be sort safe
         rays .= evolve_ray.(rays, tracer.hit_idx, tri_view, tracer.rndm, first_diffuse)

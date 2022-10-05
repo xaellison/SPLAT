@@ -8,8 +8,8 @@ include("../procedural_assets.jl")
 
 function main()
 	# Tracing params
-    width = 512
-    height = 512
+    width = 768
+    height = 768
     dλ = 25f0
     λ_min = 400.0f0
     λ_max = 700.0f0
@@ -27,7 +27,7 @@ function main()
 	tris = CuArray(foldl(vcat, meshes))
 
 
-	tex_f() = checkered_tex(16, 16, length(λ_min:dλ:λ_max)) .* 12
+	tex_f() = checkered_tex(24, 16, length(λ_min:dλ:λ_max)) .* 12
 
 	basic_params = Dict{Symbol, Any}()
 	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, forward_upscale, backward_upscale
@@ -68,19 +68,22 @@ function main()
 	# Just don't forget to call `display(fig)` before the loop
 	# and without record, one needs to insert a yield to yield to the render task
 
-	# For nvvprof:
-#	CUDA.NVTX.@range "warmup" runme(1)
-#	CUDA.NVTX.@range "run 1" runme(1)
-#	CUDA.NVTX.@range "run 2" runme(1)
-	hm[3] = runme(1)
-	display(fig)
-	@time for i in 1:400
-	#    events(hm).mouseposition |> println
-		tv = @view tris[2:first_diffuse-1]
-	    hm[3] = runme(1) # update data
-		oscillate(tv) = translate(tv, ℜ³(cos(i / 20) / 50, 0, 0))
-		tv .= oscillate.(tv)
-	    yield()
+	if false
+		# For nvvprof:
+		CUDA.NVTX.@range "warmup" runme(1)
+		CUDA.NVTX.@range "run 1" runme(1)
+		CUDA.NVTX.@range "run 2" runme(1)
+	else
+		hm[3] = runme(1)
+		display(fig)
+		@time for i in 1:400
+		#    events(hm).mouseposition |> println
+			tv = @view tris[2:first_diffuse-1]
+		    hm[3] = runme(1) # update data
+			oscillate(tv) = translate(tv, ℜ³(cos(i / 20) / 50, 0, 0))
+			tv .= oscillate.(tv)
+		    yield()
+		end
 	end
 end
 main()

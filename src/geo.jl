@@ -369,14 +369,14 @@ function rotation_matrix(axis, θ)
     return RotMatrix{3,Float32}(M)
 end
 
-function p_expansion(r, λ, x, y)
+@inline function p_expansion(r, λ, x, y)
     r.pos + # origin constant
     r.∂p∂λ * (λ - r.λ) +  #origin linear
     r.∂p∂x * (x - r.x) +  #origin linear
     r.∂p∂y * (y - r.y)
 end
 
-function d_expansion(r, λ, x, y)
+@inline function d_expansion(r, λ, x, y)
     r.dir + # direction constant
     r.∂d∂λ * (λ - r.λ) +# ... plus direction linear
     r.∂d∂x * (x - r.x) +
@@ -405,40 +405,42 @@ function distance_to_sphere(r_pos, r_dir, s::Sphere)
 end
 
 @inline function distance_to_plane(origin, dir, plane_point, normal)
-    normal = normalize(normal)
-    dist = (dot(normal, plane_point) - dot(normal, origin)) / dot(normal, dir)
+    @fastmath (dot(normal, plane_point) - dot(normal, origin)) / dot(normal, dir)
 end
 
-function distance_to_plane(r, T)
-    return distance_to_plane(r.pos, r.dir, T[2], T[1])
+@inline function distance_to_plane(r, T)
+    @inbounds return distance_to_plane(r.pos, r.dir, T[2], T[1])
 end
 
 function distance_to_plane(r, T, λ, x, y)
-    distance_to_plane(p_expansion(r, λ, x, y), d_expansion(r, λ, x, y), T[2], T[1])
+    @inbounds distance_to_plane(p_expansion(r, λ, x, y), d_expansion(r, λ, x, y), T[2], T[1])
 end
 
-function same_side(p1, p2, _a, _b)
-    # if t >= 0 then p1 and p2 are on the same side of segment a b
-    cp1 = cross(_b - _a, p1 - _a)
-    cp2 = cross(_b - _a, p2 - _a)
-    return dot(cp1, cp2) >= 0
-end
 
-function in_triangle(p, a, b, c)
-    if !same_side(p, a, b, c)
-        return false
-    end
-    if !same_side(p, b, a, c)
-        return false
-    end
-    if !same_side(p, c, a, b)
-        return false
-    end
-    return true
+@inline function in_triangle(p, a, b, c)
+    # https://blackpawn.com/texts/pointinpoly/
+    v0 = c - a
+    v1 = b - a
+    v2 = p - a
+
+    #// Compute dot products
+    dot00 = dot(v0, v0)
+    dot01 = dot(v0, v1)
+    dot02 = dot(v0, v2)
+    dot11 = dot(v1, v1)
+    dot12 = dot(v1, v2)
+
+    #// Compute barycentric coordinates
+    invDenom = 1 / (dot00 * dot11 - dot01 * dot01)
+    u = (dot11 * dot02 - dot01 * dot12) * invDenom
+    v = (dot00 * dot12 - dot01 * dot02) * invDenom
+
+    #// Check if point is in triangle
+    return (u >= 0) && (v >= 0) && (u + v < 1)
 end
 
 function in_triangle(p, T)
-    return in_triangle(p, T[2], T[3], T[4])
+    return @inbounds @fastmath in_triangle(p, T[2], T[3], T[4])
 end
 
 function vector_cosine(a::ℜ³, b::ℜ³)::Float32
