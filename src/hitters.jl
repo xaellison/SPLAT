@@ -84,12 +84,12 @@ end
 ## ExperimentalHitter2
 # theoretical max occupancy 50% on rtx 2070
 
-function next_hit_kernel2(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray{UInt64}, default) where {X}
+function next_hit_kernel2(rays :: AbstractArray{R}, n_tris :: AbstractArray{X}, dest :: AbstractArray{UInt64}, default) where {R, X}
     ray_idx = threadIdx().x + (blockIdx().x - 1) * blockDim().x
     tri_idx = threadIdx().x + (blockIdx().y - 1) * blockDim().x
 
     # download data for warp
-    r = FastRay(rays[ray_idx])
+    r = rays[ray_idx]
     arg_min = default
     min_val = Inf32
 
@@ -154,16 +154,19 @@ end
 # Higher theoretical occupancy than EH2, performs slightly worse
 
 
-function next_hit_kernel3(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray{UInt64}, default) where {X}
+function next_hit_kernel3(rays :: AbstractArray{R}, n_tris :: AbstractArray{X}, dest :: AbstractArray{UInt64}, default) where {R, X}
     #
 
     # virtual blocks!
-
-    ray_idx = threadIdx().x + (threadIdx().y - 1) * blockDim().x + (blockIdx().x - 1) * blockDim().x * blockDim().y
-    tri_idx = threadIdx().x + (blockIdx().y - 1) * blockDim().x
+    v_x = (threadIdx().x - 1) % 32 + 1
+    v_y = (threadIdx().x - 1) ÷ 32 + 1
+    v_bx = 32
+    v_by = blockDim().x ÷ 32
+    ray_idx = v_x + (v_y - 1) * v_bx + (blockIdx().x - 1) * v_bx * v_by
+    tri_idx = v_x + (blockIdx().y - 1) * v_bx
 
     # download data for warp
-    r = FastRay(rays[ray_idx])
+    r = rays[ray_idx]
     arg_min = default
     min_val = Inf32
 
@@ -213,13 +216,15 @@ function next_hit!(tracer, hitter::ExperimentalHitter3, rays, n_tris)
     src_view .= typemax(UInt64)
     # TODO: this is running <= 50% occupancy. Need to put a cap on shmem smaller than block
     config = launch_configuration(kernel.fun)
-    thread_count = 1 << exponent(config.threads)
-    threads = config.threads
+    threads = 1 << exponent(config.threads) 
+    threads = 32 #threads ÷ 2
+    @info "threads exp3 = $threads"
+    #threads = config.threads
     #@assert length(rays) % threads == 0
     # the totally confusing flip of xy for ray/tri at the block/grid level
     # is to keep grid size within maximum but also tris along thread_x (warp)
     blocks = (cld(length(rays), threads), cld(length(n_tris), 32))
-    kernel(my_args...; blocks = blocks, threads = (32, threads ÷ 32))
+    kernel(my_args...; blocks = blocks, threads = threads)
     dest_view = @view tracer.hit_idx[1:length(rays)]
     dest_view .= unsafe_decode.(src_view)
     return

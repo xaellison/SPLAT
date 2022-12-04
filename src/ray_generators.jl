@@ -68,15 +68,15 @@ function rays_from_light(light::RectLight, upscale)
         origin(x, y) =
             center +
             δ1 * (x - height ÷ 2) / (height ÷ 2) +
-            δ2 * (y - width ÷ 2) / (width ÷ 2)# +
-            #cross(dv, δ1) ./ (height ÷ 2) +
-            #cross(dv, δ2) ./ (width ÷ 2)
+            δ2 * (y - width ÷ 2) / (width ÷ 2)
             # ^ disabling noise for cosmetic reasons
+        δx = rand(Float32)
+        δy = rand(Float32)
         return ADRay(
-            origin(x, y),
+            origin(x + δx, y + δy),
             zero(ℜ³),
-            ForwardDiff.derivative(x -> origin(x, y), x),
-            ForwardDiff.derivative(y -> origin(x, y), y),
+            ForwardDiff.derivative(x -> origin(x, y), x + δx),
+            ForwardDiff.derivative(y -> origin(x, y), y + δy),
             dir,
             zero(ℜ³),
             zero(ℜ³),
@@ -85,8 +85,8 @@ function rays_from_light(light::RectLight, upscale)
             1,
             0, # lights are forward tracing, dest not known ahead of time
             λ,
-            x,
-            y,
+            x + δx,
+            y + δy,
             RAY_STATUS_ACTIVE,
         )
     end

@@ -8,21 +8,24 @@ include("../procedural_assets.jl")
 
 function main()
 	axis = ℜ³(0, 1, 0) + ℜ³(0.3, 0, 0)
-	Threads.@threads for frame in 1:180
-	@sync begin	# Tracing params
-	    width = 1024
-	    height = 1024
+	out = nothing
+	width = 1024
+	height = 1024
+ 	for frame in 1:3
+	@sync CUDA.NVTX.@range "frame $frame" begin	# Tracing params
 	    dλ = 25f0
 	    λ_min = 400.0f0
 	    λ_max = 700.0f0
 	    depth = 5
-		forward_upscale = 2
-		backward_upscale = 2
+		forward_upscale = 8
+		backward_upscale = 4
+		reclaim_after_iter=true
+		iterations_per_frame=1
 		# Geometry
 
-		lobe1 = mesh_to_FTri(load("objs/lobe1_2.obj"))
-		lobe2 = mesh_to_FTri(load("objs/lobe2_2.obj"))
-		R = rotation_matrix(axis, 2 * pi * frame / 180) * rotation_matrix(ℜ³(0, 0, 1), pi / 4) * rotation_matrix(ℜ³(1, 0, 0), pi / 2) * rotation_matrix(ℜ³(0, 0, 1), pi / 4)
+		lobe1 = mesh_to_FTri(load("C:/Users/ellis/Documents/Github/mcabbot/SHART/objs/lobe1_2.obj"))
+		lobe2 = mesh_to_FTri(load("C:/Users/ellis/Documents/Github/mcabbot/SHART/objs/lobe2_2.obj"))
+		R = rotation_matrix(ℜ³(1,0,0), 2 * pi * frame / 180) * rotation_matrix(axis, 2 * pi * 44 / 180) * rotation_matrix(ℜ³(0, 0, 1), pi / 4) * rotation_matrix(ℜ³(1, 0, 0), pi / 2) * rotation_matrix(ℜ³(0, 0, 1), pi / 4)
 		lobe1 = map(t -> translate(t, ℜ³(0, 0, -0.25) ), lobe1)
 		lobe1 = map(t -> rotate(t, R), lobe1)
 		lobe2 = map(t -> translate(t, ℜ³(0, 0, -0.25) ), lobe2)
@@ -35,7 +38,7 @@ function main()
 		tex_f() = checkered_tex(32, 16, length(λ_min:dλ:λ_max)) .*2#.* 12#CUDA.zeros(Float32, width ÷2, width÷2, length(Λ))
 
 		basic_params = Dict{Symbol, Any}()
-		@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, forward_upscale, backward_upscale
+		@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, forward_upscale, backward_upscale, iterations_per_frame, reclaim_after_iter
 
 		# Forward Trace light map
 
@@ -62,11 +65,10 @@ function main()
 		trace_kwargs = Dict{Symbol, Any}()
 		@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max
 		trace_kwargs = merge(basic_params, trace_kwargs)
+		@info "start..."
+		CUDA.@time RGB = trace!(ExperimentalTracer, ExperimentalHitter2, ExperimentalImager; intensity=1f0, iterations_per_frame=4, trace_kwargs...)
 
-		CUDA.@time RGB = trace!(ExperimentalTracer, ExperimentalHitter, ExperimentalImager; intensity=1f0, trace_kwargs...)
-
-
-		save("out/lobes/$(lpad(frame, 3, "0")).png", reshape(RGB, (height, width)))
+		save("out/lobes/$(lpad(frame, 3, "0")).png", reshape(Array(RGB), (height, width)))
 	end
 	end
 	return nothing

@@ -278,58 +278,74 @@ function trace!(
     first_diffuse,
     force_rand=nothing, # 0 to force reflection, 1 to force refraction
     intensity=1.0f0,
+    iterations_per_frame=1,
+    reclaim_after_iter=false
 ) where {T<:AbstractTracer,
          H<:AbstractHitter,
          I<:AbstractImager}
-    tex = tex_f()
-    # initialize rays for forward tracing
-    rays = rays_from_lights(lights, forward_upscale)
-    hitter = H(CuArray, rays)
-    tracer = T(CuArray, rays, forward_upscale)
+    out = nothing
+    for frame_iter in 1:iterations_per_frame
+        @sync let
+        tex = tex_f()
+        # initialize rays for forward tracing
+        rays = rays_from_lights(lights, forward_upscale)
+        hitter = H(CuArray, rays)
+        tracer = T(CuArray, rays, forward_upscale)
 
-    spectrum, retina_factor = _spectrum_datastructs(CuArray, λ_min:dλ:λ_max)
+        spectrum, retina_factor = _spectrum_datastructs(CuArray, λ_min:dλ:λ_max)
 
-    basic_params = Dict{Symbol,Any}()
-    @pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, intensity, force_rand
-    n_tris = tuple.(Int32(1):Int32(length(tris)), map(tri_from_ftri, tris)) |> m -> reshape(m, 1, length(m))
+        basic_params = Dict{Symbol,Any}()
+        @pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, intensity, force_rand
+        n_tris = tuple.(Int32(1):Int32(length(tris)), map(tri_from_ftri, tris)) |> m -> reshape(m, 1, length(m))
 
-    Λ = CuArray(collect(λ_min:dλ:λ_max))
-    array_kwargs = Dict{Symbol,Any}()
-    @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor
+        Λ = CuArray(collect(λ_min:dλ:λ_max))
+        array_kwargs = Dict{Symbol,Any}()
+        @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor
 
-    array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
-    run_evolution!(
-        hitter,
-        tracer;
-        basic_params...,
-        array_kwargs...,
-    )
-    continuum_light_map!(; tracer = tracer, basic_params..., array_kwargs...)
+        array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
+        run_evolution!(
+            hitter,
+            tracer;
+            basic_params...,
+            array_kwargs...,
+        )
+        continuum_light_map!(; tracer = tracer, basic_params..., array_kwargs...)
 
-    # reverse trace image
-    RGB3 = CuArray{Float32}(undef, width * height, 3)
-    RGB3 .= 0
-    RGB = CuArray{RGBf}(undef, width * height)
+        # reverse trace image
+        RGB3 = CuArray{Float32}(undef, width * height, 3)
+        RGB3 .= 0
+        RGB = CuArray{RGBf}(undef, width * height)
 
-    ray_generator(x, y, λ, dv) = camera_ray(cam, height ÷ backward_upscale, width ÷ backward_upscale, x, y, λ, dv)
-    rays = wrap_ray_gen(ray_generator, height ÷ backward_upscale, width ÷ backward_upscale)
+        ray_generator(x, y, λ, dv) = camera_ray(cam, height ÷ backward_upscale, width ÷ backward_upscale, x, y, λ, dv)
+        rays = wrap_ray_gen(ray_generator, height ÷ backward_upscale, width ÷ backward_upscale)
 
-    hitter = H(CuArray, rays)
-    tracer = T(CuArray, rays, backward_upscale)
-    array_kwargs = Dict{Symbol,Any}()
+        hitter = H(CuArray, rays)
+        tracer = T(CuArray, rays, backward_upscale)
+        array_kwargs = Dict{Symbol,Any}()
 
-    @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor, RGB3, RGB, rays
-    array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
+        @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor, RGB3, RGB, rays
+        array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
 
-    run_evolution!(
-        hitter,
-        tracer;
-        reorder=true,
-        basic_params...,
-        array_kwargs...,
-    )
-    continuum_shade!(I(); tracer = tracer, basic_params..., array_kwargs...)
-    @unpack RGB = array_kwargs
-    RGB = Array(RGB)
-    return RGB
+        run_evolution!(
+            hitter,
+            tracer;
+            reorder=true,
+            basic_params...,
+            array_kwargs...,
+        )
+        CUDA.NVTX.@range "shady" begin CUDA.@sync begin continuum_shade!(I(); tracer = tracer, basic_params..., array_kwargs...) end end
+        @unpack RGB = array_kwargs
+    	if frame_iter == 1
+    		out = RGB
+    	else
+    		out .= out .* (frame_iter - 1) / frame_iter + RGB ./ frame_iter
+    	end
+        end
+        if reclaim_after_iter
+            # this costs ~10% in real time loop
+            # but hitting OOM on large renders without
+            CUDA.reclaim()
+        end
+    end
+    return out
 end

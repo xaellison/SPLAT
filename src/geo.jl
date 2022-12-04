@@ -110,6 +110,9 @@ translate(t::Tri, v) = Tri(t[1], t[2] + v, t[3] + v, t[4] + v)
 translate(t::STri, v) = STri(t[1], t[2] + v, t[3] + v, t[4] + v, t[5], t[6], t[7])
 translate(t::FTri, v) =
     FTri(t[1], t[2] + v, t[3] + v, t[4] + v, t[5], t[6], t[7], t[8], t[9], t[10])
+
+scale(t::FTri, s) =
+    FTri(t[1], t[2] * s, t[3] * s, t[4] * s, t[5], t[6], t[7], t[8], t[9], t[10])
 rotate(t::FTri, R) = FTri(
     R * t[1],
     R * t[2],
@@ -122,6 +125,20 @@ rotate(t::FTri, R) = FTri(
     t[9],
     t[10],
 )
+
+function circumcenter(T)
+    # https://en.wikipedia.org/wiki/Circumscribed_circle#Higher_dimensions
+    A, B, C = @view T[2:4]
+    a = A - C
+    b = B - C
+    return C + cross(b * dot(a, a) - a * dot(b, b), cross(a, b)) / (2 * dot(cross(a, b), cross(a, b)))
+end
+
+function circumscribing_sphere(T)
+    cc = circumcenter(T)
+    R = norm(T[2] - cc)
+    return Sphere(cc, R)
+end
 
 
 function expand(r::ADRay, λ::Float32)::FastRay
@@ -293,24 +310,7 @@ function mesh_to_FTri(mesh)::Array{FTri}
         (t1, t2, t3) = map(p -> ℜ³(p.uv..., 0), face.points)
         push!(out, FTri(cross(v1 - v2, v2 - v3), v1, v2, v3, n1, n2, n3, t1, t2, t3))
     end
-    # prepend degenerate triangle which will alway fail hit tests
-    prepend!(
-        out,
-        [
-            FTri(
-                zero(ℜ³),
-                zero(ℜ³),
-                zero(ℜ³),
-                zero(ℜ³),
-                zero(ℜ³),
-                zero(ℜ³),
-                zero(ℜ³),
-                zero(ℜ³),
-                zero(ℜ³),
-                zero(ℜ³),
-            ),
-        ],
-    )
+    # NOTE: does not include a degenerate first triangle, that must be handled at the scene level
     out
 end
 

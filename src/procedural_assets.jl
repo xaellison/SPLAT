@@ -17,12 +17,15 @@ function stage()
     return [T1, T2, T3]
 end
 
-function ripples()
+function ripples(t=0)
     # xy surface on unit square
     x0, y0, x1, y1 = 0, 0, 1, 1
-    δx = 0.025
-    δy = 0.025
-    f(x, y) = (sin(30 * x) + sin(40 * y + 10 * x)) * 0.0025
+    δx = 0.00125
+    δy = 0.00125
+    Ω(k) = k * tanh(k)
+    f(k, x, t) = sin(k * x - Ω(k) * t)
+    f(x, y) = (f(50, x, t)+f(60, x, t)+f(70, y, t)+f(80, y, t))*0.000125
+    #sqrt((2+sin(15 * x - 2 * pi * t))^-1 + (2+sin(20 * y + 5 * x - 2 * pi * t))^-1) * 0.04
     V(x, y) = ℜ³(x, y, f(x, y))
     # https://mathworld.wolfram.com/NormalVector.html
     N(x, y) = ℜ³(

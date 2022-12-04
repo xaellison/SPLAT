@@ -8,8 +8,8 @@ include("../procedural_assets.jl")
 
 function main()
 	# Tracing params
-    width = 768
-    height = 768
+    width = 1024
+    height = 1024
     dλ = 25f0
     λ_min = 400.0f0
     λ_max = 700.0f0
@@ -80,7 +80,7 @@ function main()
 		#    events(hm).mouseposition |> println
 			tv = @view tris[2:first_diffuse-1]
 		    hm[3] = runme(1) # update data
-			oscillate(tv) = translate(tv, ℜ³(cos(i / 20) / 50, 0, 0))
+			oscillate(tv) = translate(tv, ℜ³(cos(i / 20) / 50, 0, sin(i / 20) / 50))
 			tv .= oscillate.(tv)
 		    yield()
 		end
