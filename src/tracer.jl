@@ -5,7 +5,8 @@ include("ray_imagers.jl")
 include("rgb_spectrum.jl")
 include("atomic_argmin.jl")
 include("hitters.jl")
-include("partition.jl")
+include("partition.jl") # this brings in geo.jl
+include("bv.jl")
 
 using ForwardDiff
 using Makie
@@ -238,7 +239,7 @@ function run_evolution!(
         # everything has to be a view of the same size to avoid allocs + be sort safe
         rays .= evolve_ray.(rays, tracer.hit_idx, tri_view, tracer.rndm, first_diffuse)
 
-        cap = partition!(rays, tracer.ray_swap; by=r->r.status!=RAY_STATUS_ACTIVE)
+        cap = partition!(rays, tracer.ray_swap; by=(ignore_arg, r)->r.status!=RAY_STATUS_ACTIVE)
         if cap % 512 != 0
             # TODO - I think this lazy math is inefficient
             cap = min(length(rays), ((cap ÷ 512) + 1) * 512)
@@ -279,17 +280,23 @@ function trace!(
     force_rand=nothing, # 0 to force reflection, 1 to force refraction
     intensity=1.0f0,
     iterations_per_frame=1,
-    reclaim_after_iter=false
+    reclaim_after_iter=false,
+   
 ) where {T<:AbstractTracer,
          H<:AbstractHitter,
          I<:AbstractImager}
     out = nothing
+    centers, members = cluster_fuck(tris, 64)
     for frame_iter in 1:iterations_per_frame
         @sync let
         tex = tex_f()
         # initialize rays for forward tracing
+        @info "ray init"
         rays = rays_from_lights(lights, forward_upscale)
-        hitter = H(CuArray, rays)
+        
+        
+        hitter = BoundingVolumeHitter(CuArray, rays, centers, members)
+        #hitter = H(CuArray, rays)
         tracer = T(CuArray, rays, forward_upscale)
 
         spectrum, retina_factor = _spectrum_datastructs(CuArray, λ_min:dλ:λ_max)
@@ -319,20 +326,21 @@ function trace!(
         ray_generator(x, y, λ, dv) = camera_ray(cam, height ÷ backward_upscale, width ÷ backward_upscale, x, y, λ, dv)
         rays = wrap_ray_gen(ray_generator, height ÷ backward_upscale, width ÷ backward_upscale)
 
-        hitter = H(CuArray, rays)
+        hitter = BoundingVolumeHitter(CuArray, rays, centers, members)
+        #hitter = H(CuArray, rays)
         tracer = T(CuArray, rays, backward_upscale)
         array_kwargs = Dict{Symbol,Any}()
 
         @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor, RGB3, RGB, rays
         array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
 
-        run_evolution!(
+        CUDA.NVTX.@range "evolver" begin CUDA.@sync begin run_evolution!(
             hitter,
             tracer;
             reorder=true,
             basic_params...,
             array_kwargs...,
-        )
+        ) end end
         CUDA.NVTX.@range "shady" begin CUDA.@sync begin continuum_shade!(I(); tracer = tracer, basic_params..., array_kwargs...) end end
         @unpack RGB = array_kwargs
     	if frame_iter == 1

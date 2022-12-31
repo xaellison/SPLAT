@@ -20,8 +20,8 @@ end
 function ripples(t=0)
     # xy surface on unit square
     x0, y0, x1, y1 = 0, 0, 1, 1
-    δx = 0.00125
-    δy = 0.00125
+    δx = 0.005
+    δy = 0.005
     Ω(k) = k * tanh(k)
     f(k, x, t) = sin(k * x - Ω(k) * t)
     f(x, y) = (f(50, x, t)+f(60, x, t)+f(70, y, t)+f(80, y, t))*0.000125

@@ -128,6 +128,9 @@ rotate(t::FTri, R) = FTri(
 
 function circumcenter(T)
     # https://en.wikipedia.org/wiki/Circumscribed_circle#Higher_dimensions
+    if T == zero(typeof(T))
+        return zero(ℜ³)
+    end
     A, B, C = @view T[2:4]
     a = A - C
     b = B - C

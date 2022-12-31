@@ -20,11 +20,12 @@ function batch_partition(
     hi,
     parity,
     by::F,
-) where {F}
+    by_arg1::B
+) where {F, B}
     idx0 = lo + (blockIdx().x - 1i32) * blockDim().x + threadIdx().x
     @inbounds if idx0 <= hi
         val = values[idx0]
-        comparison = by(val)
+        comparison = by(by_arg1, val)
     end
 
     @inbounds if idx0 <= hi
@@ -75,12 +76,13 @@ function partition_batches_kernel(
     hi,
     parity,
     by::F,
-) where {T,F}
+    by_arg1::B,
+) where {T,F,B}
     sums = CuDynamicSharedArray(Int, blockDim().x)
     swap = CuDynamicSharedArray(T, blockDim().x, sizeof(sums))
     write_floor = CuDynamicSharedArray(Int, 1, sizeof(sums) + sizeof(swap))
     write_ceil = CuDynamicSharedArray(Int, 1, sizeof(sums) + sizeof(swap) + sizeof(write_floor))
-    batch_partition(values, dest, atomic_floor, atomic_ceil, write_floor, write_ceil, swap, sums, lo, hi, parity, by)
+    batch_partition(values, dest, atomic_floor, atomic_ceil, write_floor, write_ceil, swap, sums, lo, hi, parity, by, by_arg1)
     return
 end
 
@@ -95,6 +97,7 @@ function partition_copy!(
     dest::AbstractArray{T},
     vals::AbstractArray{T},
     by::F,
+    by_arg1,
 ) where {T,F}
     L = length(vals)
     block_dim = 256
@@ -105,7 +108,7 @@ function partition_copy!(
         blocks = cld(L, block_dim),
         threads = block_dim,
         shmem = block_dim * (sizeof(Int) + sizeof(T)) + 2 * sizeof(Int),
-        partition_batches_kernel(vals, dest, atomic_floor, atomic_ceil, 0, L, false, by)
+        partition_batches_kernel(vals, dest, atomic_floor, atomic_ceil, 0, L, false, by, by_arg1)
     )
 
     return atomic_floor
@@ -116,8 +119,8 @@ Partitions `vals` according to `by`, `lt`. Overwrites `swap` as scratch space.
 `swap` may be larger than `vals`.
 Returns an Integer, the number of false values in the first half of `vals`
 """
-function partition!(vals, swap; by)
-    partition_holder = partition_copy!(swap, vals, by)
+function partition!(vals, swap; by, by_arg1=nothing)
+    partition_holder = partition_copy!(swap, vals, by, by_arg1)
     # faster than .=
     v =  @view swap[1:length(vals)]
 #    vals .= v
@@ -126,4 +129,16 @@ function partition!(vals, swap; by)
     partition = Array(partition_holder)[1]
     # TODO - use unified memory
     return partition
+end
+
+
+let 
+    # demonstrates equivalent 'partition-perm' (in the spirit of sortperm)
+    c = CUDA.rand(100000)
+    i = CuArray(1:length(c))
+    c_tmp = CUDA.zeros(eltype(c), length(c))
+    i_tmp = CUDA.zeros(eltype(i), length(i))
+    p1 = partition!(c, c_tmp; by=(_, x)->x>1)
+    p2 = partition!(i, i_tmp; by=(c, i)->c[i]>1, by_arg1=c)
+    @assert p1 == p2
 end

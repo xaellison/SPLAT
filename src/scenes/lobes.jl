@@ -11,14 +11,14 @@ function main()
 	out = nothing
 	width = 1024
 	height = 1024
- 	for frame in 1:3
+ 	for frame in 1:1
 	@sync CUDA.NVTX.@range "frame $frame" begin	# Tracing params
 	    dλ = 25f0
 	    λ_min = 400.0f0
 	    λ_max = 700.0f0
 	    depth = 5
-		forward_upscale = 8
-		backward_upscale = 4
+		forward_upscale = 2
+		backward_upscale = 2
 		reclaim_after_iter=true
 		iterations_per_frame=1
 		# Geometry
@@ -66,7 +66,7 @@ function main()
 		@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max
 		trace_kwargs = merge(basic_params, trace_kwargs)
 		@info "start..."
-		CUDA.@time RGB = trace!(ExperimentalTracer, ExperimentalHitter2, ExperimentalImager; intensity=1f0, iterations_per_frame=4, trace_kwargs...)
+		CUDA.@time RGB = trace!(StableTracer, ExperimentalHitter2, ExperimentalImager; intensity=1f0, iterations_per_frame=4, trace_kwargs...)
 
 		save("out/lobes/$(lpad(frame, 3, "0")).png", reshape(Array(RGB), (height, width)))
 	end

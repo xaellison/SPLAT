@@ -30,7 +30,7 @@ ExperimentalHitter(A, rays) = ExperimentalHitter(A{UInt64}(undef, size(rays)))
 
 struct ExperimentalHitter2 <: AbstractHitter
     tmp::AbstractArray{UInt64}
-end
+end 
 
 ExperimentalHitter2(A, rays) = ExperimentalHitter2(A{UInt64}(undef, size(rays)))
 
@@ -39,6 +39,33 @@ struct ExperimentalHitter3 <: AbstractHitter
 end
 
 ExperimentalHitter3(A, rays) = ExperimentalHitter3(A{UInt64}(undef, size(rays)))
+
+
+struct ExperimentalHitter4 <: AbstractHitter
+    tmp::AbstractArray{UInt64}
+end
+
+ExperimentalHitter4(A, rays) = ExperimentalHitter4(A{UInt64}(undef, size(rays)))
+
+
+struct BoundingVolumeHitter <: AbstractHitter
+    bvs :: AbstractArray{Sphere}
+    bv_tris :: Dict{Int, AbstractArray{Int}}
+    ray_queue_atomic_counters :: AbstractArray{Int}
+    ray_queues :: AbstractArray{Int}
+    queue_swap :: AbstractArray{Int}
+    hitter :: ExperimentalHitter4
+end
+
+BoundingVolumeHitter(A, rays, bvs, memberships) = begin
+    BoundingVolumeHitter(bvs,
+                         Dict(k => A(v) for (k, v) in memberships),
+                         A(zeros(Int, length(bvs))),
+                         A(zeros(Int, (length(bvs), length(rays)))),
+                         A(zeros(Int, (length(bvs), length(rays)))),
+                         ExperimentalHitter4(A, rays)
+                         )
+end
 
 
 abstract type AbstractTracer end

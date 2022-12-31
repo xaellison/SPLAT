@@ -9,9 +9,9 @@ include("../procedural_assets.jl")
 function main()
 	axis = ℜ³(0, 1, 0) + ℜ³(0.3, 0, 0)
 	out = nothing
-	width = 2048
-	height = 2048
-	frame_N = 120
+	width = 1024
+	height = 1024
+	frame_N = 1
  	for frame in 1:frame_N
 	@sync CUDA.NVTX.@range "frame $frame" begin	# Tracing params
 	    dλ = 25f0
@@ -68,10 +68,12 @@ function main()
 		]
 
 		trace_kwargs = Dict{Symbol, Any}()
+		
 		@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max
 		trace_kwargs = merge(basic_params, trace_kwargs)
 		@info "start..."
-		CUDA.@time RGB = trace!(ExperimentalTracer, ExperimentalHitter2, ExperimentalImager; intensity=1f0, iterations_per_frame=4, force_rand=1.0f0, trace_kwargs...)
+		
+		CUDA.@time RGB = trace!(ExperimentalTracer, BoundingVolumeHitter, ExperimentalImager; intensity=1f0, iterations_per_frame=4, force_rand=1.0f0, trace_kwargs...)
 
 		save("out/arty/$(lpad(frame, 3, "0")).png", permutedims(reshape(Array(RGB), (height, width)), (2,1)))
 	end
