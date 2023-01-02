@@ -313,9 +313,6 @@ end
 
 function queue_rays_kernel(rays, spheres, queues, queue_counters)
     
-    coordinated_write_floor = CuDynamicSharedArray(Int, 1)
-    sums = CuDynamicSharedArray(Int, blockDim().x, sizeof(Int))
-    
     ray_idx = threadIdx().x + (blockIdx().y - 1) * blockDim().x
     r = zero(FastRay)
     if 1 <= ray_idx <= length(rays)
@@ -326,21 +323,22 @@ function queue_rays_kernel(rays, spheres, queues, queue_counters)
     bv = spheres[bv_index]
 
     distance = get_hit((Int32(bv_index), bv), r)[1]
-    condition =  (! isinf(distance) && distance > 0)
-    sums[threadIdx().x] = 1 & condition
-    sync_threads()
-    CUDA.QuickSortImpl.cumsum!(sums)
-    sync_threads()
-    
-    if threadIdx().x == 1
-        to_add = sums[end]
-        block_write_floor = CUDA.atomic_add!(pointer(queue_counters, bv_index), to_add)
-        coordinated_write_floor[1] = block_write_floor
-    end
-    sync_threads()
+    condition = 1 & (! isinf(distance) && distance > 0)
+    thread_cumsum = condition
 
-    write_index = coordinated_write_floor[1] + sums[threadIdx().x]
-    if condition# && write_index <= size(queues)[2]
+    for iter in 0:4
+        Δ = 1 << iter
+        δ = CUDA.shfl_up_sync(0xFFFFFFFF, thread_cumsum, Δ)
+        thread_cumsum += laneid() - Δ > 0 ? δ : 0
+    end
+    block_write_floor = 0
+    if laneid() == 32
+        block_write_floor = CUDA.atomic_add!(pointer(queue_counters, bv_index), thread_cumsum)
+    end
+    sync_warp()
+    block_write_floor = CUDA.shfl_sync(0xFFFFFFFF, block_write_floor, 32)
+    write_index = block_write_floor + thread_cumsum
+    if Bool(condition) && write_index <= size(queues)[2]
         queues[bv_index, write_index] = ray_idx
     end
     return
@@ -351,7 +349,7 @@ function next_hit!(tracer, hitter::BoundingVolumeHitter, rays, n_tris)
     CUDA.@sync begin
     hitter.ray_queue_atomic_counters .= 0
     Q_block_size = 256
-    CUDA.@sync @cuda blocks=(length(hitter.bvs), cld(length(rays), Q_block_size), ) threads=Q_block_size shmem=(Q_block_size+1)*sizeof(Int) queue_rays_kernel(rays, CuArray(hitter.bvs), hitter.ray_queues, hitter.ray_queue_atomic_counters)
+    CUDA.@sync @cuda blocks=(length(hitter.bvs), cld(length(rays), Q_block_size), ) threads=Q_block_size  queue_rays_kernel(rays, CuArray(hitter.bvs), hitter.ray_queues, hitter.ray_queue_atomic_counters)
     
     hitter.hitter.tmp .= unsafe_encode(Inf32, UInt32(1))
     tests = 0
@@ -366,8 +364,7 @@ function next_hit!(tracer, hitter::BoundingVolumeHitter, rays, n_tris)
                     tri_view = @view n_tris[hitter.bv_tris[n]]
                     
                 #   @info Array(ray_index_view)
-                    next_hit!(tracer, hitter.hitter, rays, ray_index_view, tri_view)
-                        
+                    next_hit!(tracer, hitter.hitter, rays, ray_index_view, tri_view)   
                     tests += length(ray_index_view) * length(tri_view)
                 end
             end
