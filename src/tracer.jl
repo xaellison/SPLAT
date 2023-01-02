@@ -1,6 +1,6 @@
 #include("material.jl") # disable for nvvp
 include("utils.jl")
-include("ray_generators.jl") # disable for nvvp
+include("ray_generators.jl")
 #include("ray_imagers.jl") # disable for nvvp
 #include("rgb_spectrum.jl") # disable for nvvp
 include("atomic_argmin.jl")
