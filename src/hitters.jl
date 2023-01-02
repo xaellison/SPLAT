@@ -323,8 +323,8 @@ function queue_rays_kernel(rays, spheres, queues, queue_counters)
     bv = spheres[bv_index]
 
     distance = get_hit((Int32(bv_index), bv), r)[1]
-    condition = 1 & (! isinf(distance) && distance > 0)
-    thread_cumsum = condition
+    condition = ! isinf(distance) && distance > 0
+    thread_cumsum = 1 & condition
 
     for iter in 0:4
         Δ = 1 << iter
@@ -338,7 +338,7 @@ function queue_rays_kernel(rays, spheres, queues, queue_counters)
     sync_warp()
     block_write_floor = CUDA.shfl_sync(0xFFFFFFFF, block_write_floor, 32)
     write_index = block_write_floor + thread_cumsum
-    if Bool(condition) && write_index <= size(queues)[2]
+    if condition && write_index <= size(queues)[2]
         queues[bv_index, write_index] = ray_idx
     end
     return
