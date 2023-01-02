@@ -11,7 +11,7 @@ function main()
 	out = nothing
 	width = 1024
 	height = 1024
-	frame_N = 1
+	frame_N = 4
  	for frame in 1:frame_N
 	@sync CUDA.NVTX.@range "frame $frame" begin	# Tracing params
 	    dλ = 25f0
@@ -21,7 +21,7 @@ function main()
 		forward_upscale = 8
 		backward_upscale = 8
 		reclaim_after_iter=true
-		iterations_per_frame=4
+		iterations_per_frame=1
 		# Geometry
 		rips = ripples(0.3*frame / frame_N)
 		rips = map(t -> translate(t, ℜ³(-0.5, -0.5, 0) ), rips)
@@ -73,7 +73,7 @@ function main()
 		trace_kwargs = merge(basic_params, trace_kwargs)
 		@info "start..."
 		
-		CUDA.@time RGB = trace!(ExperimentalTracer, BoundingVolumeHitter, ExperimentalImager; intensity=1f0, iterations_per_frame=4, force_rand=1.0f0, trace_kwargs...)
+		CUDA.@time RGB = trace!(ExperimentalTracer, ExperimentalHitter2, ExperimentalImager; intensity=1f0, iterations_per_frame=4, force_rand=1.0f0, trace_kwargs...)
 
 		save("out/arty/$(lpad(frame, 3, "0")).png", permutedims(reshape(Array(RGB), (height, width)), (2,1)))
 	end

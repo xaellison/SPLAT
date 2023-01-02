@@ -124,7 +124,7 @@ function partition!(vals, swap; by, by_arg1=nothing)
     # faster than .=
     v =  @view swap[1:length(vals)]
 #    vals .= v
-    copy!(vals, v)
+    CUDA.@allowscalar copy!(vals, v)
     #vals .=
     partition = Array(partition_holder)[1]
     # TODO - use unified memory

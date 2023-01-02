@@ -1,11 +1,11 @@
-include("material.jl")
+#include("material.jl") # disable for nvvp
 include("utils.jl")
-include("ray_generators.jl")
-include("ray_imagers.jl")
-include("rgb_spectrum.jl")
+include("ray_generators.jl") # disable for nvvp
+#include("ray_imagers.jl") # disable for nvvp
+#include("rgb_spectrum.jl") # disable for nvvp
 include("atomic_argmin.jl")
 include("hitters.jl")
-include("partition.jl") # this brings in geo.jl
+#include("partition.jl") # this brings in geo.jl # disable for nvvp
 include("bv.jl")
 
 using ForwardDiff
@@ -286,7 +286,7 @@ function trace!(
          H<:AbstractHitter,
          I<:AbstractImager}
     out = nothing
-    centers, members = cluster_fuck(tris, 64)
+    @time centers, members = cluster_fuck(tris, 16)
     for frame_iter in 1:iterations_per_frame
         @sync let
         tex = tex_f()

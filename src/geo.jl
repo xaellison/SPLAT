@@ -24,6 +24,10 @@ struct Sphere
     radius::Float32
 end
 
+Base.isless(s1 :: Sphere, s2 :: Sphere) = begin
+    s1.radius < s2.radius || s1.origin < s2.origin
+end
+
 struct Cam
     pos::ℜ³
     look_at::ℜ³
@@ -83,6 +87,7 @@ struct FastRay <: AbstractRay
     ignore_tri::Int
 end
 
+FastRay(ray::FastRay) = ray
 FastRay(adray::ADRay) = FastRay(adray.pos, adray.dir, adray.ignore_tri)
 
 Base.zero(::ℜ³) = ℜ³(0.0f0, 0.0f0, 0.0f0)

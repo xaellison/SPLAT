@@ -13,7 +13,6 @@ function cluster_fuck(tris, N)
     @info "Clustering $(length(tris)) tris"
     # annoying matrix for clustering
     data = foldl(hcat, map(T->Array(circumcenter(T)), tris))
-    display(data)
     result = kmeans(data, N)
     
     # initialize clusters so each Tri in one cluster
@@ -29,6 +28,7 @@ function cluster_fuck(tris, N)
     @info Set(result.assignments)
     radii = [maximum(norm(circumcenter(T) - ℜ³_centers[c]) + circumscribing_sphere(T).radius for T in clusters[c]) for c in 1:N]
     spheres = Sphere.(ℜ³_centers, radii)
+    sort!(spheres)
     # the clusters need to be updated to include Triangles which ma
     for T in tris
         for (c, S) in enumerate(spheres)
@@ -49,7 +49,8 @@ function cluster_fuck(tris, N)
     clusters_by_index = Dict()
 
     for c in keys(clusters)
-        clusters_by_index[c] = [inverted_indices[T] for T in clusters[c]]
+        # sort should help the gpu have better aligned accesses in certain instances (eg, two well separated models)
+        clusters_by_index[c] = sort([inverted_indices[T] for T in clusters[c]])
     end
 
     return spheres, clusters_by_index

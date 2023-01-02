@@ -1,5 +1,5 @@
 # RUN FROM /
-using Revise, LazyArrays, Parameters, GLMakie, CUDA, KernelAbstractions, CUDAKernels, Random
+using Revise, LazyArrays, Parameters, GLMakie, CUDA, KernelAbstractions, Random
 
 include("../geo.jl")
 include("../skys.jl")
@@ -11,14 +11,14 @@ function main()
 	out = nothing
 	width = 1024
 	height = 1024
- 	for frame in 1:1
+ 	for frame in 1:3
 	@sync CUDA.NVTX.@range "frame $frame" begin	# Tracing params
 	    dλ = 25f0
 	    λ_min = 400.0f0
 	    λ_max = 700.0f0
 	    depth = 5
-		forward_upscale = 2
-		backward_upscale = 2
+		forward_upscale = 8
+		backward_upscale = 8
 		reclaim_after_iter=true
 		iterations_per_frame=1
 		# Geometry

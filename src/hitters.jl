@@ -282,7 +282,7 @@ function next_hit_kernel4(rays :: AbstractArray{R}, index_view, n_tris :: Abstra
 
     # r should be its original value - upload
     operand = unsafe_encode(min_val, UInt32(arg_min))
-    if ray_idx <= length(rays)
+    if meta_index <= length(index_view) && ray_idx <= length(rays)
         CUDA.@atomic dest[ray_idx] = min(dest[ray_idx], operand)
     end
     return nothing
@@ -295,14 +295,14 @@ function next_hit!(tracer, hitter::ExperimentalHitter4, rays, index_view, n_tris
     kernel = @cuda launch = false next_hit_kernel4(my_args...)
     
     # TODO: this is running <= 50% occupancy. Need to put a cap on shmem smaller than block
-    config = launch_configuration(kernel.fun)
+    
     #threads = 32 #threads ÷ 2
    # @info "threads exp3 = $threads"
     threads = 32
    #@assert length(rays) % threads == 0
    # the totally confusing flip of xy for ray/tri at the block/grid level
    # is to keep grid size within maximum but also tris along thread_x (warp)
-    blocks = (cld(length(rays), threads), cld(length(n_tris), threads))
+    blocks = (cld(length(index_view), threads), cld(length(n_tris), threads))
     kernel(my_args...; blocks = blocks, threads = threads)
     
   #  @assert false
@@ -316,20 +316,20 @@ function queue_rays_kernel(rays, spheres, queues, queue_counters)
     coordinated_write_floor = CuDynamicSharedArray(Int, 1)
     sums = CuDynamicSharedArray(Int, blockDim().x, sizeof(Int))
     
-    ray_idx = threadIdx().x + (blockIdx().x - 1) * blockDim().x
+    ray_idx = threadIdx().x + (blockIdx().y - 1) * blockDim().x
     r = zero(FastRay)
     if 1 <= ray_idx <= length(rays)
         r = FastRay(rays[ray_idx])
     end
     
-    bv_index = blockIdx().y
+    bv_index = blockIdx().x
     bv = spheres[bv_index]
 
     distance = get_hit((Int32(bv_index), bv), r)[1]
-    condition = true # (! isinf(distance) && distance > 0)
-    sums[threadIdx().x] = threadIdx().x#1 & condition
+    condition =  (! isinf(distance) && distance > 0)
+    sums[threadIdx().x] = 1 & condition
     sync_threads()
-   # CUDA.QuickSortImpl.cumsum!(sums)
+    CUDA.QuickSortImpl.cumsum!(sums)
     sync_threads()
     
     if threadIdx().x == 1
@@ -340,47 +340,40 @@ function queue_rays_kernel(rays, spheres, queues, queue_counters)
     sync_threads()
 
     write_index = coordinated_write_floor[1] + sums[threadIdx().x]
-    if condition && write_index <= size(queues)[2]
+    if condition# && write_index <= size(queues)[2]
         queues[bv_index, write_index] = ray_idx
     end
     return
 end
 
 
-
-
 function next_hit!(tracer, hitter::BoundingVolumeHitter, rays, n_tris)
-    @time CUDA.@sync begin
-    hitter.ray_queues .= 0
-    partitions = Dict()
-    begin
-        for (n, bv) in enumerate(hitter.bvs)
-            begin
-                queue_view = @view hitter.ray_queues[n, :]
-                swap_view = @view hitter.queue_swap[n, :]
-                queue_view .= 1:length(rays)
-                rays_in_queue = partition!(queue_view, swap_view; by= (rays, i)-> !(0 < get_hit((Int32(i), bv), FastRay(rays[i]))[1] < Inf), by_arg1=rays)
-                partitions[n] = rays_in_queue
-            end
-        end
-    end
-   
-   
-    hitter.hitter.tmp .= unsafe_encode(Inf32, UInt32(1))
-    @sync begin
-        for (n, rays_in_queue) in partitions
-            @async begin
-                # TODO 32 is a kinda safe guess of block size
-                padded_rays_in_queue = min(length(rays), (rays_in_queue ÷ 32 + 0) * 32)
-              #  @info rays_in_queue, padded_rays_in_queue
-                ray_index_view = @view hitter.ray_queues[n, 1:padded_rays_in_queue]
-                tri_view = @view n_tris[hitter.bv_tris[n]]
-             #   @info Array(ray_index_view)
-                next_hit!(tracer, hitter.hitter, rays, ray_index_view, tri_view)
-            end
-        end
-    end
+    CUDA.@sync begin
+    hitter.ray_queue_atomic_counters .= 0
+    Q_block_size = 256
+    CUDA.@sync @cuda blocks=(length(hitter.bvs), cld(length(rays), Q_block_size), ) threads=Q_block_size shmem=(Q_block_size+1)*sizeof(Int) queue_rays_kernel(rays, CuArray(hitter.bvs), hitter.ray_queues, hitter.ray_queue_atomic_counters)
     
+    hitter.hitter.tmp .= unsafe_encode(Inf32, UInt32(1))
+    tests = 0
+    @sync begin
+        for (n, rays_in_queue) in enumerate(Array(hitter.ray_queue_atomic_counters))
+             @async begin
+                # TODO 32 is a kinda safe guess of block size
+                padded_rays_in_queue = min(length(rays), (rays_in_queue ÷ 32 + 0) * 32) # WARNING padding disabled
+               # @info "Q $n has $rays_in_queue rays against $(length(hitter.bv_tris[n])) tris"  
+                ray_index_view = @view hitter.ray_queues[n, 1:padded_rays_in_queue]
+                if length(ray_index_view) >= 32
+                    tri_view = @view n_tris[hitter.bv_tris[n]]
+                    
+                #   @info Array(ray_index_view)
+                    next_hit!(tracer, hitter.hitter, rays, ray_index_view, tri_view)
+                        
+                    tests += length(ray_index_view) * length(tri_view)
+                end
+            end
+        end
+    end
+    @info "tests reduced -> $(tests / (length(rays) * length(n_tris)))"
     tracer.hit_idx .= unsafe_decode.(hitter.hitter.tmp)
     end
     return
