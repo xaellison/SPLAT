@@ -1,11 +1,11 @@
-#include("material.jl") # disable for nvvp
+include("material.jl") # disable for nvvp
 include("utils.jl")
 include("ray_generators.jl")
-#include("ray_imagers.jl") # disable for nvvp
-#include("rgb_spectrum.jl") # disable for nvvp
+include("ray_imagers.jl") # disable for nvvp
+include("rgb_spectrum.jl") # disable for nvvp
 include("atomic_argmin.jl")
 include("hitters.jl")
-#include("partition.jl") # this brings in geo.jl # disable for nvvp
+include("partition.jl") # this brings in geo.jl # disable for nvvp
 include("bv.jl")
 
 using ForwardDiff
@@ -277,6 +277,8 @@ function trace!(
     height,
     depth,
     first_diffuse,
+    bounding_volumes=nothing, 
+    bounding_volumes_members=nothing,
     force_rand=nothing, # 0 to force reflection, 1 to force refraction
     intensity=1.0f0,
     iterations_per_frame=1,
@@ -286,16 +288,16 @@ function trace!(
          H<:AbstractHitter,
          I<:AbstractImager}
     out = nothing
-    @time centers, members = cluster_fuck(tris, 16)
+    
     for frame_iter in 1:iterations_per_frame
-        @sync let
+        let
         tex = tex_f()
         # initialize rays for forward tracing
         @info "ray init"
         rays = rays_from_lights(lights, forward_upscale)
         
         
-        hitter = BoundingVolumeHitter(CuArray, rays, centers, members)
+        hitter = BoundingVolumeHitter(CuArray, rays, bounding_volumes, bounding_volumes_members)
         #hitter = H(CuArray, rays)
         tracer = T(CuArray, rays, forward_upscale)
 
@@ -326,7 +328,7 @@ function trace!(
         ray_generator(x, y, λ, dv) = camera_ray(cam, height ÷ backward_upscale, width ÷ backward_upscale, x, y, λ, dv)
         rays = wrap_ray_gen(ray_generator, height ÷ backward_upscale, width ÷ backward_upscale)
 
-        hitter = BoundingVolumeHitter(CuArray, rays, centers, members)
+        hitter = BoundingVolumeHitter(CuArray, rays, bounding_volumes, bounding_volumes_members)
         #hitter = H(CuArray, rays)
         tracer = T(CuArray, rays, backward_upscale)
         array_kwargs = Dict{Symbol,Any}()

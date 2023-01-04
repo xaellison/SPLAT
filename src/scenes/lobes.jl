@@ -17,7 +17,7 @@ function main()
 	    λ_min = 400.0f0
 	    λ_max = 700.0f0
 	    depth = 5
-		forward_upscale = 8
+		forward_upscale = 4
 		backward_upscale = 8
 		reclaim_after_iter=true
 		iterations_per_frame=1
@@ -33,6 +33,7 @@ function main()
 		meshes = [[zero(FTri)], lobe1, lobe2]
 		first_diffuse = 1 + length(lobe1) + 1
 		tris = foldl(vcat, meshes)
+		bounding_volumes, bounding_volumes_members = cluster_fuck(tris, 64)
 
 		Λ = CuArray(collect(λ_min:dλ:λ_max))
 		tex_f() = checkered_tex(32, 16, length(λ_min:dλ:λ_max)) .*2#.* 12#CUDA.zeros(Float32, width ÷2, width÷2, length(Λ))
@@ -63,10 +64,10 @@ function main()
 	    cam = my_moving_camera()
 
 		trace_kwargs = Dict{Symbol, Any}()
-		@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max
+		@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max, bounding_volumes, bounding_volumes_members
 		trace_kwargs = merge(basic_params, trace_kwargs)
 		@info "start..."
-		CUDA.@time RGB = trace!(StableTracer, ExperimentalHitter2, ExperimentalImager; intensity=1f0, iterations_per_frame=4, trace_kwargs...)
+		CUDA.@time RGB = trace!(ExperimentalTracer, ExperimentalHitter2, ExperimentalImager; intensity=1f0, iterations_per_frame=4, trace_kwargs...)
 
 		save("out/lobes/$(lpad(frame, 3, "0")).png", reshape(Array(RGB), (height, width)))
 	end

@@ -132,13 +132,3 @@ function partition!(vals, swap; by, by_arg1=nothing)
 end
 
 
-let 
-    # demonstrates equivalent 'partition-perm' (in the spirit of sortperm)
-    c = CUDA.rand(100000)
-    i = CuArray(1:length(c))
-    c_tmp = CUDA.zeros(eltype(c), length(c))
-    i_tmp = CUDA.zeros(eltype(i), length(i))
-    p1 = partition!(c, c_tmp; by=(_, x)->x>1)
-    p2 = partition!(i, i_tmp; by=(c, i)->c[i]>1, by_arg1=c)
-    @assert p1 == p2
-end

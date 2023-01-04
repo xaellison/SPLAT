@@ -25,7 +25,7 @@ function main()
 	meshes = [[zero(FTri)], glass_sphere, stage()]
 	first_diffuse = 1 + 1 + length(glass_sphere)
 	tris = CuArray(foldl(vcat, meshes))
-
+	
 
 	tex_f() = checkered_tex(24, 16, length(λ_min:dλ:λ_max)) .* 12
 
@@ -47,10 +47,12 @@ function main()
 		RectLight(ℜ³(0, 0, 8), ℜ³(0, 0, -1), ℜ³(1, 0, 0), ℜ³(0, 1, 0), height, width),
 	]
 
-	trace_kwargs = Dict{Symbol, Any}()
-	@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max
-	trace_kwargs = merge(basic_params, trace_kwargs)
+	
 	runme(i) = begin
+		bounding_volumes, bounding_volumes_members = cluster_fuck(Array(tris), 2)
+		trace_kwargs = Dict{Symbol, Any}()
+		@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max, bounding_volumes, bounding_volumes_members
+		trace_kwargs = merge(basic_params, trace_kwargs)
 		RGB= trace!(StableTracer,
 							  ExperimentalHitter2,
 							  ExperimentalImager; intensity=1.0f0, force_rand=1f0, trace_kwargs...)

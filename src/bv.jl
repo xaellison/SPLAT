@@ -12,8 +12,12 @@ Shitty bounding volume method.
 function cluster_fuck(tris, N)
     @info "Clustering $(length(tris)) tris"
     # annoying matrix for clustering
-    data = foldl(hcat, map(T->Array(circumcenter(T)), tris))
-    result = kmeans(data, N)
+    data = zeros(Float32, (3, length(tris)))
+    for (n, T) in enumerate(tris)
+        data[:, n] = circumcenter(T)
+    end
+    
+    result = kmeans(data, N, tol=1e2)
     
     # initialize clusters so each Tri in one cluster
     clusters = Dict()

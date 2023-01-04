@@ -1,4 +1,4 @@
-using Revise, LazyArrays, CUDA, Random, Parameters
+using Revise, LazyArrays, CUDA, Random, Parameters, BenchmarkTools
 include("geo.jl")
 include("tracer.jl")
 let 
@@ -22,13 +22,16 @@ let
     #N_rays = 256^2
     #rays = FastRay.(Ref(center), normalize.(CUDA.rand(ℜ³, N_rays) .- CUDA.rand(ℜ³, N_rays)), 1)    
     
-    hitter = BoundingVolumeHitter(CuArray, rays, centers, members)
-    #hitter = ExperimentalHitter2(CuArray, rays)
+    #hitter = BoundingVolumeHitter(CuArray, rays, centers, members, 4)
+    hitter = ExperimentalHitter2(CuArray, rays)
     tracer = StableTracer(CuArray, rays, 1)
     n_tris = tuple.(Int32(1):Int32(length(tris)), map(tri_from_ftri, tris)) |> m -> reshape(m, 1, length(m)) |> CuArray
-    for iter in 1:4
-        CUDA.NVTX.@range "iter $iter" next_hit!(tracer, hitter, rays, n_tris)
-    end
-   
+    next_hit!(tracer, hitter, rays, n_tris)
+    #next_hit!(tracer, hitter, rays, n_tris)
+    
+    @benchmark begin CUDA.@sync next_hit!($tracer, $hitter, $rays, $n_tris) end evals=1 samples=20 seconds=15
+    #for iter in 1:4
+    #    CUDA.NVTX.@range "iter $iter" next_hit!(tracer, hitter, rays, n_tris)
+    #end
     
 end

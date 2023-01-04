@@ -231,6 +231,13 @@ function shade_tex3(
     # NB disregards in_medium
     # evolve to hit a diffuse surface
     out = zero(RGBf)
+    if adr.status == RAY_STATUS_INFINITY
+        x = (normalize(adr.dir)[2] * 0.5f0 + 0.5f0) * 0.2f0
+        if isnan(x)
+            x = 0.0f0
+        end
+        return RGBf(x,x,x)
+    end
     if adr.status == RAY_STATUS_DIFFUSE
         for i_λ in 1:length(Λ)
         λ = Λ[i_λ]
@@ -288,7 +295,7 @@ function continuum_shade!(imager::ExperimentalImager;
     """
     RGB3 .= 0.0f0
     tri_view = @view tris[tracer.hit_idx]
-    s(args...) = shade_tex2(args..., spectrum, tex, retina_factor)
+    s(args...) = shade_tex3(args..., spectrum, tex, retina_factor)
     δx = tracer.δ |> a -> reshape(a, (length(a)))
     δy = tracer.δ |> a -> reshape(a, (1, length(a)))
     rays .= final_evolution.(rays, tracer.hit_idx, tri_view)
