@@ -322,7 +322,7 @@ end
 
 
 
-function queue_rays_kernel(rays, spheres, queues, queue_counters)
+function queue_rays_kernel(rays, spheres, queue_index, queues, queue_counter)
     
     ray_idx = threadIdx().x + (blockIdx().y - 1) * blockDim().x
     r = zero(FastRay)
@@ -330,10 +330,10 @@ function queue_rays_kernel(rays, spheres, queues, queue_counters)
         r = FastRay(rays[ray_idx])
     end
     
-    bv_index = blockIdx().x
-    bv = spheres[bv_index]
+    
+    bv = spheres[1]
 
-    distance = get_hit((Int32(bv_index), bv), r)[1]
+    distance = get_hit((Int32(queue_index), bv), r)[1]
     condition = ! isinf(distance) && distance > 0
     thread_cumsum = 1 & condition
 
@@ -344,44 +344,51 @@ function queue_rays_kernel(rays, spheres, queues, queue_counters)
     end
     block_write_floor = 0
     if laneid() == 32
-        block_write_floor = CUDA.atomic_add!(pointer(queue_counters, bv_index), thread_cumsum)
+        block_write_floor = CUDA.atomic_add!(pointer(queue_counter), thread_cumsum)
     end
     sync_warp()
     block_write_floor = CUDA.shfl_sync(0xFFFFFFFF, block_write_floor, 32)
     write_index = block_write_floor + thread_cumsum
     if condition && write_index <= size(queues)[2]
-        queues[bv_index, write_index] = ray_idx
+        queues[queue_index, write_index] = ray_idx
     end
     return
 end
 
 
 function next_hit!(tracer, hitter::BoundingVolumeHitter, rays, n_tris)
-    CUDA.@sync begin
-    hitter.ray_queue_atomic_counters .= 0
     Q_block_size = 256
-    CUDA.@sync @cuda blocks=(length(hitter.bvs), cld(length(rays), Q_block_size), ) threads=Q_block_size  queue_rays_kernel(rays, CuArray(hitter.bvs), hitter.ray_queues, hitter.ray_queue_atomic_counters)
-    
-    hitter.hitter.tmp .= unsafe_encode(Inf32, UInt32(1))
+
+    CUDA.@sync begin
     tests = 0
+    bv_count = length(hitter.bvs)
+    concurrency = length(hitter.ray_queue_atomic_counters)
+    device_bvs = CuArray(hitter.bvs)
+    hitter.hitter.tmp .= unsafe_encode(Inf32, UInt32(1))
+
     @sync begin
-        for (n, rays_in_queue) in enumerate(Array(hitter.ray_queue_atomic_counters))
-             @async begin
-                # TODO 32 is a kinda safe guess of block size
-                padded_rays_in_queue = min(length(rays), (rays_in_queue ÷ 32 + 0) * 32) # WARNING padding disabled
-               # @info "Q $n has $rays_in_queue rays against $(length(hitter.bv_tris[n])) tris"  
-                ray_index_view = @view hitter.ray_queues[n, 1:padded_rays_in_queue]
-                if length(ray_index_view) >= 32
-                    tri_view = @view n_tris[hitter.bv_tris[n]]
-                    
-                #   @info Array(ray_index_view)
-                    next_hit!(tracer, hitter.hitter, rays, ray_index_view, tri_view)   
-                    tests += length(ray_index_view) * length(tri_view)
+        for task_index in 1:concurrency
+            @async begin
+                for bv_index in task_index:concurrency:bv_count
+                    # within this block, we are focussed on a single bv
+                    counter_view = @view hitter.ray_queue_atomic_counters[task_index]
+                    counter_view .= 0
+                    bv_view = @view device_bvs[bv_index]
+                    @cuda blocks=(1, cld(length(rays), Q_block_size), ) threads=Q_block_size  queue_rays_kernel(rays, bv_view, task_index, hitter.ray_queues, counter_view)
+                    rays_in_queue = Array(counter_view)[1]
+                    padded_rays_in_queue = min(length(rays), (rays_in_queue ÷ 32 + 0) * 32) # WARNING padding disabled
+                    ray_index_view = @view hitter.ray_queues[task_index, 1:padded_rays_in_queue]
+                    if length(ray_index_view) >= 32
+                        tri_view = @view n_tris[hitter.bv_tris[bv_index]]
+                        next_hit!(tracer, hitter.hitter, rays, ray_index_view, tri_view)   
+                        tests += length(ray_index_view) * length(tri_view)
+                    end
                 end
             end
         end
     end
-    @info "tests reduced -> $(tests / (length(rays) * length(n_tris)))"
+
+   # @info "tests reduced -> $(tests / (length(rays) * length(n_tris)))"
     tracer.hit_idx .= unsafe_decode.(hitter.hitter.tmp)
     end
     return

@@ -22,8 +22,8 @@ let
     #N_rays = 256^2
     #rays = FastRay.(Ref(center), normalize.(CUDA.rand(ℜ³, N_rays) .- CUDA.rand(ℜ³, N_rays)), 1)    
     
-    #hitter = BoundingVolumeHitter(CuArray, rays, centers, members, 4)
-    hitter = ExperimentalHitter2(CuArray, rays)
+    hitter = BoundingVolumeHitter(CuArray, rays, centers, members, 2)
+    #hitter = ExperimentalHitter2(CuArray, rays)
     tracer = StableTracer(CuArray, rays, 1)
     n_tris = tuple.(Int32(1):Int32(length(tris)), map(tri_from_ftri, tris)) |> m -> reshape(m, 1, length(m)) |> CuArray
     next_hit!(tracer, hitter, rays, n_tris)

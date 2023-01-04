@@ -57,12 +57,12 @@ struct BoundingVolumeHitter <: AbstractHitter
     hitter :: ExperimentalHitter4
 end
 
-BoundingVolumeHitter(A, rays, bvs, memberships) = begin
+BoundingVolumeHitter(A, rays, bvs, memberships, concurrency::Int=4) = begin
     BoundingVolumeHitter(bvs,
                          Dict(k => A(v) for (k, v) in memberships),
-                         A(zeros(Int, length(bvs))),
-                         A(zeros(Int, (length(bvs), length(rays)))),
-                         A(zeros(Int, (length(bvs), length(rays)))),
+                         A(zeros(Int, concurrency)),
+                         A(zeros(Int, (concurrency, length(rays)))),
+                         A(zeros(Int, (concurrency, length(rays)))),
                          ExperimentalHitter4(A, rays)
                          )
 end

@@ -38,7 +38,7 @@ function main()
 		R = rotation_matrix(ℜ³(0,1,0), 2 * pi * (frame / frame_N))
 		tris = map(t -> rotate(t, R), tris)
 
-		bounding_volumes, bounding_volumes_members = cluster_fuck(tris, 32)
+		bounding_volumes, bounding_volumes_members = cluster_fuck(tris, 256)
 
 		tex_f() = checkered_tex(32, 16, length(λ_min:dλ:λ_max)) .*0#.* 12#CUDA.zeros(Float32, width ÷2, width÷2, length(Λ))
 
