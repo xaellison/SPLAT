@@ -1,4 +1,4 @@
-using Revise, LazyArrays, CUDA, Random, Parameters, BenchmarkTools
+using Revise, LazyArrays, CUDA, Random, Parameters, BenchmarkTools, Serialization
 include("geo.jl")
 include("tracer.jl")
 let 
@@ -18,7 +18,16 @@ let
 
     tris = mesh_to_FTri(load("C:/Users/ellis/Documents/Github/mcabbot/SHART/objs/artemis_smaller.obj"))
     center = tris |> centroidish
-    centers, members = cluster_fuck(tris, 256)
+    centers, members = nothing, nothing
+    try
+        centers, members = open(deserialize, "hit_lab_bvs.jls")
+        @info "loading cached bvs"
+    catch
+        @info "recomputing bvs"
+        cm = cluster_fuck(tris, 256)
+        open(f -> serialize(f, cm), "hit_lab_bvs.jls", "w")
+        centers, members =  cm
+    end
     #N_rays = 256^2
     #rays = FastRay.(Ref(center), normalize.(CUDA.rand(ℜ³, N_rays) .- CUDA.rand(ℜ³, N_rays)), 1)    
     
