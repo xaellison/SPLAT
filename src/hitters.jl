@@ -149,7 +149,6 @@ function next_hit!(tracer, hitter::ExperimentalHitter2, rays, n_tris)
     config = launch_configuration(kernel.fun, shmem = threads -> get_shmem(threads))
     
     threads = config.threads#256#1 << exponent(config.threads)
-    @info threads
     #threads = 32
     #@assert length(rays) % threads == 0
     # the totally confusing flip of xy for ray/tri at the block/grid level
@@ -323,7 +322,6 @@ function next_hit!(tracer, hitter::ExperimentalHitter4, rays, index_view, n_tris
     threads = config.threads#256#1 << exponent(config.threads)
     # non-maximal blocksize seems to perform slightly better
     threads = min(256, threads)
-    @info threads
    #@assert length(rays) % threads == 0
    # the totally confusing flip of xy for ray/tri at the block/grid level
    # is to keep grid size within maximum but also tris along thread_x (warp)
@@ -380,9 +378,9 @@ function next_hit!(tracer, hitter::BoundingVolumeHitter, rays, n_tris)
     device_bvs = CuArray(hitter.bvs)
     hitter.hitter.tmp .= unsafe_encode(Inf32, UInt32(1))
 
-    begin
+    @sync begin
         for task_index in 1:concurrency
-            begin
+            @async begin
                 for bv_index in task_index:concurrency:bv_count
                     # within this block, we are focussed on a single bv
                     counter_view = @view hitter.ray_queue_atomic_counters[task_index]
@@ -397,7 +395,9 @@ function next_hit!(tracer, hitter::BoundingVolumeHitter, rays, n_tris)
                         next_hit!(tracer, hitter.hitter, rays, ray_index_view, tri_view)   
                         tests += length(ray_index_view) * length(tri_view)
                     end
+                    
                 end
+                synchronize()
             end
         end
     end

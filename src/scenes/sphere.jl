@@ -49,7 +49,7 @@ function main()
 
 	
 	runme(i) = begin
-		bounding_volumes, bounding_volumes_members = cluster_fuck(Array(tris), 2)
+		bounding_volumes, bounding_volumes_members = cluster_fuck(Array(tris), 4)
 		trace_kwargs = Dict{Symbol, Any}()
 		@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max, bounding_volumes, bounding_volumes_members
 		trace_kwargs = merge(basic_params, trace_kwargs)
@@ -78,7 +78,7 @@ function main()
 	else
 		hm[3] = runme(1)
 		display(fig)
-		@time for i in 1:400
+		@time for i in 1:40
 		#    events(hm).mouseposition |> println
 			tv = @view tris[2:first_diffuse-1]
 		    hm[3] = runme(1) # update data

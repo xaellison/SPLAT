@@ -11,15 +11,15 @@ function main()
 	out = nothing
 	width = 2048
 	height = 2048
-	frame_N = 4
+	frame_N = 180
  	for frame in 1:frame_N
 	@sync CUDA.NVTX.@range "frame $frame" begin	# Tracing params
 	    dλ = 25f0
 	    λ_min = 400.0f0
 	    λ_max = 700.0f0
 	    depth = 5
-		forward_upscale = 4
-		backward_upscale = 4
+		forward_upscale = 2
+		backward_upscale = 2
 		reclaim_after_iter=true
 		iterations_per_frame=4
 		intensity = 2
