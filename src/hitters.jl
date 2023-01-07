@@ -88,7 +88,7 @@ function next_hit_kernel2(rays :: AbstractArray{R}, n_tris :: AbstractArray{X}, 
     ray_idx = threadIdx().x + (blockIdx().x - 1) * blockDim().x
     shmem = CuDynamicSharedArray(FastRay, blockDim().x)
     shmem[threadIdx().x] = ray_idx <= length(rays) ? FastRay(rays[ray_idx]) : zero(FastRay)
-    #sync_threads()
+    sync_threads()
     tri_idx = threadIdx().x + (blockIdx().y - 1) * blockDim().x
 
     
@@ -253,48 +253,55 @@ function next_hit_kernel4(rays :: AbstractArray{R}, index_view, n_tris :: Abstra
     meta_index = threadIdx().x + (blockIdx().x - 1) * blockDim().x
     ray_idx = meta_index <= length(index_view) ? index_view[meta_index] : 1
     tri_idx = threadIdx().x + (blockIdx().y - 1) * blockDim().x
-
+    shmem = CuDynamicSharedArray(Tuple{Int, FastRay}, blockDim().x)
     # download data for warp
-    r = zero(FastRay)
+    
     if meta_index <= length(index_view) && ray_idx <= length(rays)
-        r = rays[ray_idx]
+        shmem[threadIdx().x] = ray_idx, FastRay(rays[ray_idx])
+    else
+        shmem[threadIdx().x] = typemax(Int), zero(FastRay)
     end
-    arg_min = default
-    min_val = Inf32
-
+    sync_threads()
     i = zero(Int32)
     T = Tri(zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³))
     if tri_idx <= length(n_tris)
         i, T = n_tris[tri_idx]
     end
 
-    # time to shuffle rays
-
-    for shuffle in 1:32
-        t = distance_to_plane(r, T)
-        p = r.pos + r.dir * t
-        if i != 1 && in_triangle(p, T) && min_val > t > 0 && r.ignore_tri != i
-            arg_min = i
-            min_val = t
-        end
+    for warp_iter in 1:(blockDim().x ÷ 32)
+        ray_idx, r = shmem[(warp_iter - 1) * 32 + laneid()]#rays[ray_idx]
         sync_warp()
+        arg_min = default
+        min_val = Inf32
 
-        arg_min = CUDA.shfl_sync(0xFFFFFFFF, arg_min, laneid() % 32 + 1)
-        min_val = CUDA.shfl_sync(0xFFFFFFFF, min_val, laneid() % 32 + 1)
-        p_x = CUDA.shfl_sync(0xFFFFFFFF, r.pos[1], laneid() % 32 + 1)
-        p_y = CUDA.shfl_sync(0xFFFFFFFF, r.pos[2], laneid() % 32 + 1)
-        p_z = CUDA.shfl_sync(0xFFFFFFFF, r.pos[3], laneid() % 32 + 1)
-        d_x = CUDA.shfl_sync(0xFFFFFFFF, r.dir[1], laneid() % 32 + 1)
-        d_y = CUDA.shfl_sync(0xFFFFFFFF, r.dir[2], laneid() % 32 + 1)
-        d_z = CUDA.shfl_sync(0xFFFFFFFF, r.dir[3], laneid() % 32 + 1)
-        ig = CUDA.shfl_sync(0xFFFFFFFF, r.ignore_tri, laneid() % 32 + 1)
-        r = FastRay(ℜ³(p_x, p_y, p_z), ℜ³(d_x, d_y, d_z), ig)
-    end
+        # time to shuffle rays
 
-    # r should be its original value - upload
-    operand = unsafe_encode(min_val, UInt32(arg_min))
-    if meta_index <= length(index_view) && ray_idx <= length(rays)
-        CUDA.@atomic dest[ray_idx] = min(dest[ray_idx], operand)
+        for shuffle in 1:32
+            t = distance_to_plane(r, T)
+            p = r.pos + r.dir * t
+            if i != 1 && in_triangle(p, T) && min_val > t > 0 && r.ignore_tri != i
+                arg_min = i
+                min_val = t
+            end
+            sync_warp()
+
+            arg_min = CUDA.shfl_sync(0xFFFFFFFF, arg_min, laneid() % 32 + 1)
+            min_val = CUDA.shfl_sync(0xFFFFFFFF, min_val, laneid() % 32 + 1)
+            p_x = CUDA.shfl_sync(0xFFFFFFFF, r.pos[1], laneid() % 32 + 1)
+            p_y = CUDA.shfl_sync(0xFFFFFFFF, r.pos[2], laneid() % 32 + 1)
+            p_z = CUDA.shfl_sync(0xFFFFFFFF, r.pos[3], laneid() % 32 + 1)
+            d_x = CUDA.shfl_sync(0xFFFFFFFF, r.dir[1], laneid() % 32 + 1)
+            d_y = CUDA.shfl_sync(0xFFFFFFFF, r.dir[2], laneid() % 32 + 1)
+            d_z = CUDA.shfl_sync(0xFFFFFFFF, r.dir[3], laneid() % 32 + 1)
+            ig = CUDA.shfl_sync(0xFFFFFFFF, r.ignore_tri, laneid() % 32 + 1)
+            r = FastRay(ℜ³(p_x, p_y, p_z), ℜ³(d_x, d_y, d_z), ig)
+        end
+
+        # r should be its original value - upload
+        operand = unsafe_encode(min_val, UInt32(arg_min))
+        if ray_idx <= length(rays)
+            CUDA.@atomic dest[ray_idx] = min(dest[ray_idx], operand)
+        end
     end
     return nothing
 end
@@ -310,11 +317,18 @@ function next_hit!(tracer, hitter::ExperimentalHitter4, rays, index_view, n_tris
     #threads = 32 #threads ÷ 2
    # @info "threads exp3 = $threads"
     threads = 32
+    get_shmem(threads) = threads * (sizeof(Int) + sizeof(FastRay))
+    config = launch_configuration(kernel.fun, shmem = threads -> get_shmem(threads))
+    
+    threads = config.threads#256#1 << exponent(config.threads)
+    # non-maximal blocksize seems to perform slightly better
+    threads = min(256, threads)
+    @info threads
    #@assert length(rays) % threads == 0
    # the totally confusing flip of xy for ray/tri at the block/grid level
    # is to keep grid size within maximum but also tris along thread_x (warp)
     blocks = (cld(length(index_view), threads), cld(length(n_tris), threads))
-    kernel(my_args...; blocks = blocks, threads = threads)
+    kernel(my_args...; blocks = blocks, threads = threads, shmem=get_shmem(threads))
     
   #  @assert false
     return
@@ -366,9 +380,9 @@ function next_hit!(tracer, hitter::BoundingVolumeHitter, rays, n_tris)
     device_bvs = CuArray(hitter.bvs)
     hitter.hitter.tmp .= unsafe_encode(Inf32, UInt32(1))
 
-    @sync begin
+    begin
         for task_index in 1:concurrency
-            @async begin
+            begin
                 for bv_index in task_index:concurrency:bv_count
                     # within this block, we are focussed on a single bv
                     counter_view = @view hitter.ray_queue_atomic_counters[task_index]
