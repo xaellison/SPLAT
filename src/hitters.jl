@@ -267,15 +267,18 @@ function next_hit_kernel4(rays :: AbstractArray{R}, index_view, n_tris :: Abstra
         i, T = n_tris[tri_idx]
     end
 
-    for warp_iter in 1:(blockDim().x ÷ 32)
-        ray_idx, r = shmem[(warp_iter - 1) * 32 + laneid()]#rays[ray_idx]
+    # each warp should pull a different chunk of rays so atomic ops don't clash
+    original_warp = (threadIdx().x - 1) ÷ 32
+    warps_in_block = blockDim().x ÷ 32
+    for warp_shift in 1:warps_in_block
+        ray_idx, r = shmem[((original_warp + warp_shift) % warps_in_block) * 32 + laneid()]
         sync_warp()
         arg_min = default
         min_val = Inf32
 
         # time to shuffle rays
 
-        for shuffle in 1:32
+        for _ in 1:32
             t = distance_to_plane(r, T)
             p = r.pos + r.dir * t
             if i != 1 && in_triangle(p, T) && min_val > t > 0 && r.ignore_tri != i
