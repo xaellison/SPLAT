@@ -67,6 +67,38 @@ BoundingVolumeHitter(A, rays, bvs, memberships, concurrency::Int=4) = begin
                          )
 end
 
+# dynamic programming bounding volume
+struct DPBVHitter <: AbstractHitter
+    bvs :: AbstractArray{Sphere}
+    bv_tri_count :: AbstractArray{Int}
+    bv_tris :: AbstractArray{Int}
+    ray_queue_atomic_counters :: AbstractArray{Int}
+    ray_queues :: AbstractArray{Int}
+    queue_swap :: AbstractArray{Int}
+    tmp::AbstractArray{UInt64}
+end
+
+function pack_bv_tris(A, tris, bvs, memberships) :: Tuple{AbstractArray{Int}, AbstractArray{Int}}
+    # for 100k tris, 256 bvs, `out` will take up 195 MB
+    out = A{Int}(undef, length(bvs), length(tris))
+    host_counts = zeros(Int, length(bvs))
+    for (k, v) in memberships
+        out[k, 1:length(v)] .= A(v)
+        host_counts[k] = length(v)
+    end 
+    return A(host_counts), out
+end
+
+DPBVHitter(A, rays, tris, bvs, memberships, concurrency::Int=16) = begin
+    DPBVHitter(bvs,
+                pack_bv_tris(A, tris, bvs, memberships)...,
+                A(zeros(Int, concurrency)),
+                A(zeros(Int, (concurrency, length(rays)))),
+                A(zeros(Int, (concurrency, length(rays)))),
+                A{UInt64}(undef, size(rays)),
+                )
+end
+
 
 abstract type AbstractTracer end
 

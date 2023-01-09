@@ -297,7 +297,8 @@ function trace!(
         rays = rays_from_lights(lights, forward_upscale)
         
         
-        hitter = BoundingVolumeHitter(CuArray, rays, bounding_volumes, bounding_volumes_members)
+        #hitter = BoundingVolumeHitter(CuArray, rays, bounding_volumes, bounding_volumes_members)
+        hitter = DPBVHitter(CuArray, rays, tris, bvs, memberships)
         #hitter = H(CuArray, rays)
         tracer = T(CuArray, rays, forward_upscale)
 
@@ -328,7 +329,8 @@ function trace!(
         ray_generator(x, y, λ, dv) = camera_ray(cam, height ÷ backward_upscale, width ÷ backward_upscale, x, y, λ, dv)
         rays = wrap_ray_gen(ray_generator, height ÷ backward_upscale, width ÷ backward_upscale)
 
-        hitter = BoundingVolumeHitter(CuArray, rays, bounding_volumes, bounding_volumes_members)
+        hitter = DPBVHitter(CuArray, rays, tris, bvs, memberships)
+        #hitter = BoundingVolumeHitter(CuArray, rays, bounding_volumes, bounding_volumes_members)
         #hitter = H(CuArray, rays)
         tracer = T(CuArray, rays, backward_upscale)
         array_kwargs = Dict{Symbol,Any}()
