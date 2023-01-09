@@ -33,8 +33,8 @@ let
     #rays = FastRay.(Ref(center), normalize.(CUDA.rand(ℜ³, N_rays) .- CUDA.rand(ℜ³, N_rays)), 1)    
     n_tris = tuple.(Int32(1):Int32(length(tris)), map(tri_from_ftri, tris)) |> m -> reshape(m, 1, length(m)) |> CuArray
     tracer = StableTracer(CuArray, rays, 1)
-    hitter = DPBVHitter(CuArray, rays, tris, centers, members)
-    #hitter = BoundingVolumeHitter(CuArray, rays, centers, members, 2)
+    #hitter = DPBVHitter(CuArray, rays, tris, centers, members)
+    hitter = BoundingVolumeHitter(CuArray, rays, centers, members, 4)
     next_hit!(tracer, hitter, rays, n_tris)
     @benchmark begin CUDA.@sync next_hit!($tracer, $hitter, $rays, $n_tris) end evals=1 samples=20 seconds=11
 

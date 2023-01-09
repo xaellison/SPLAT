@@ -415,6 +415,42 @@ end
 # DPBVHitter
 
 
+
+function queue_rays_kernel2(rays, spheres, queues, queue_counter)
+    
+    ray_idx = threadIdx().x + (blockIdx().y - 1) * blockDim().x
+    r = zero(FastRay)
+    if 1 <= ray_idx <= length(rays)
+        r = FastRay(rays[ray_idx])
+    end
+    
+    
+    bv = spheres[blockIdx().x]
+
+    distance = get_hit((Int32(1), bv), r)[1]
+    condition = ! isinf(distance) && distance > 0
+    thread_cumsum = 1 & condition
+
+    for iter in 0:4
+        Δ = 1 << iter
+        δ = CUDA.shfl_up_sync(0xFFFFFFFF, thread_cumsum, Δ)
+        thread_cumsum += laneid() - Δ > 0 ? δ : 0
+    end
+    block_write_floor = 0
+    if laneid() == 32
+        block_write_floor = CUDA.atomic_add!(pointer(queue_counter, blockIdx().x), thread_cumsum)
+    end
+    sync_warp()
+    block_write_floor = CUDA.shfl_sync(0xFFFFFFFF, block_write_floor, 32)
+    write_index = block_write_floor + thread_cumsum
+    if condition && write_index <= size(queues)[2]
+        queues[blockIdx().x, write_index] = ray_idx
+    end
+    return
+end
+
+
+
 function next_hit_kernel5(rays :: AbstractArray{R}, ray_index_view, n_tris :: AbstractArray{X}, tri_index_view, dest :: AbstractArray{UInt64}, default) where {R, X}
     ray_meta_index = threadIdx().x + (blockIdx().x - 1) * blockDim().x
     ray_idx = ray_meta_index <= length(ray_index_view) ? ray_index_view[ray_meta_index] : 1
@@ -487,15 +523,16 @@ function dp_launcher_kernel(bv_floor, child_threads, child_shmem, bv_tri_count, 
     # this min should never be necessary?
     padded_rays_in_queue = min(length(rays), rays_in_queue)
     threads=child_threads
-    blocks = (cld(padded_rays_in_queue, threads), cld(length(n_tris), threads))
+    
     if padded_rays_in_queue <= 0
         return
     end
     queue_view = @view queues[queue_index, 1:padded_rays_in_queue]
     tri_counts = bv_tri_count[bv_index]
     tri_index_view = @view bv_tris[bv_index, 1:tri_counts]
+    blocks = (cld(padded_rays_in_queue, threads), cld(tri_counts, threads))
     s = CuDeviceStream()
-    @cuda dynamic=true stream=s threads=threads shmem=child_shmem blocks=blocks next_hit_kernel5(rays, queue_view, n_tris, tri_index_view, tmp, default)
+    @cuda dynamic=true stream=s  threads=threads shmem=child_shmem blocks=blocks next_hit_kernel5(rays, queue_view, n_tris, tri_index_view, tmp, default)
    
     CUDA.device_synchronize()
     return
@@ -515,11 +552,10 @@ function next_hit!(tracer, hitter::DPBVHitter, rays, n_tris)
     for bv_floor in 1:concurrency:bv_count
         hitter.ray_queue_atomic_counters .= 0
         bv_view = @view device_bvs[bv_floor:bv_floor + concurrency - 1]
-        
-        for task_index in 1:concurrency
-            counter_view = @view hitter.ray_queue_atomic_counters[task_index]
-            counter_view .= 0
-            @cuda blocks=(1, cld(length(rays), Q_block_size), ) threads=Q_block_size  queue_rays_kernel(rays, bv_view, task_index, hitter.ray_queues, counter_view)
+        # todo: replace loop with blocks
+        let#for task_index in 1:concurrency
+            hitter.ray_queue_atomic_counters .= 0
+            @cuda blocks=(concurrency, cld(length(rays), Q_block_size), ) threads=Q_block_size queue_rays_kernel2(rays, bv_view, hitter.ray_queues, hitter.ray_queue_atomic_counters)
         end
         let 
             get_shmem(threads) = threads * (sizeof(Int) + sizeof(FastRay))

@@ -83,7 +83,7 @@ function pack_bv_tris(A, tris, bvs, memberships) :: Tuple{AbstractArray{Int}, Ab
     out = A{Int}(undef, length(bvs), length(tris))
     host_counts = zeros(Int, length(bvs))
     for (k, v) in memberships
-        out[k, 1:length(v)] .= A(v)
+        out[k, 1:length(v)] .= A(sort(v))
         host_counts[k] = length(v)
     end 
     return A(host_counts), out

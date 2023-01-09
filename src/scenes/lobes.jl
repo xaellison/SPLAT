@@ -11,7 +11,7 @@ function main()
 	out = nothing
 	width = 1024
 	height = 1024
- 	for frame in 1:3
+ 	for frame in 1:12
 	@sync CUDA.NVTX.@range "frame $frame" begin	# Tracing params
 	    dλ = 25f0
 	    λ_min = 400.0f0
