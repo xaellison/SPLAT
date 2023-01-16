@@ -130,3 +130,5 @@ abstract type AbstractImager end
 struct StableImager <: AbstractImager end
 
 struct ExperimentalImager <: AbstractImager end
+
+struct ExperimentalImager2 <: AbstractImager end

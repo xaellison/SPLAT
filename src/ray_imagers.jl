@@ -309,3 +309,116 @@ function continuum_shade!(imager::ExperimentalImager;
     upres_rgb = reshape(upres_rgb, size(RGB))
     RGB .= upres_rgb
 end
+
+##
+
+
+
+# bilinear tex filter
+function shade_tex4_kernel(
+    out,
+    rays::AbstractArray{ADRay},
+    tri_view::AbstractArray{AbstractT},
+    δx,
+    δy,
+    Λ,
+    tex::AbstractArray{Float32},
+    retina_factor,
+    intensity
+) where {AbstractT}
+    @inbounds begin
+    ray_index = blockDim().x * (blockIdx().x - 1) + threadIdx().x
+    adr = zero(ADRay)
+    T = zero(AbstractT)
+    if ray_index <= length(rays)
+        adr = rays[ray_index]
+        T = tri_view[ray_index]
+    end
+    
+    # NB disregards in_medium
+    # evolve to hit a diffuse surface
+    thread_out = zero(RGBf)
+    if adr.status == RAY_STATUS_INFINITY
+        x = (normalize(adr.dir)[2] * 0.5f0 + 0.5f0) * 0.2f0
+        if isnan(x)
+            x = 0.0f0
+        end
+        thread_out = RGBf(x,x,x)
+    end
+    if adr.status == RAY_STATUS_DIFFUSE
+        for i_λ in 1:length(Λ)
+        λ = Λ[i_λ]
+        r = expand(adr, λ, adr.x + δx[threadIdx().y], adr.y + δy[threadIdx().z])
+
+            # compute the position in the new triangle, set dir to zero
+            _u, _v = tex_uv(r, T)
+            if  !isnan(_u) && !isnan(_v)
+                # it's theoretically possible u, v could come back as zero
+                u, v = _u * size(tex)[1], _v * size(tex)[2]
+                
+                X = tex[u, v, Float32(i_λ)]
+                R = retina_factor[1, 1, i_λ] * X
+                G = retina_factor[1, 2, i_λ] * X
+                B = retina_factor[1, 3, i_λ] * X
+                thread_out += RGBf(R, G, B)
+            end
+            sync_warp()
+        end
+    end
+    thread_out = RGBf(clamp(thread_out.r, 0, 1), clamp(thread_out.g, 0, 1), clamp(thread_out.b, 0, 1))
+    
+    if ray_index <= length(rays)
+        out[threadIdx().y, threadIdx().z, ray_index] = thread_out
+    end
+    end
+    return
+end
+
+
+function continuum_shade!(imager::ExperimentalImager2;
+    tracer,
+    RGB3,
+    RGB,
+    tris,
+    rays,
+    n_tris,
+    spectrum,
+    first_diffuse,
+    retina_factor,
+    dλ,
+    tex,
+    width,
+    height,
+    intensity=1.0f0,
+    kwargs...,
+)
+    """
+    Uses shade_tex2 and final_evolution to git a final hit calculation
+    by a factor of (δx * δy) compared to StableImager
+    """
+    RGB3 .= 0.0f0
+    tri_view = @view tris[tracer.hit_idx]
+    
+    δx = tracer.δ |> a -> reshape(a, (length(a)))
+    δy = tracer.δ |> a -> reshape(a, (1, length(a)))
+    rays .= final_evolution.(rays, tracer.hit_idx, tri_view)
+    R = length(rays)
+    # reshape so expansions are first dims, and put in a common block for better IO patterns
+    upres_rgb = copy(RGB)
+    upres_rgb = reshape(upres_rgb, (length(δx), length(δy), R))
+    rays_per_block = 2
+
+    tuple_ret = Tuple(Tuple(retina_factor[1, i, :]) for i in 1:3)
+
+    args = upres_rgb, rays, tri_view, δx, δy, spectrum, tex, retina_factor, intensity
+    kernel = @cuda launch=false shade_tex4_kernel(args...)
+    kernel(args...; threads=(rays_per_block, length(δx), length(δy)), blocks=(R ÷ rays_per_block))
+    #s(args...) = shade_tex3(args..., spectrum, tex, retina_factor)
+    #upres_rgb = s.(reshape(rays, (1, 1, R)), reshape(tri_view, (1,1, R)), first_diffuse, intensity, δx, δy)
+    upres_rgb = permutedims(upres_rgb, (3, 1, 2))
+    # next 3 lines expand into final image
+    upres_rgb = reshape(upres_rgb, width ÷ length(δx), height ÷ length(δy), length(δx), length(δy))
+    upres_rgb = permutedims(upres_rgb, (3, 1, 4, 2))
+    upres_rgb = reshape(upres_rgb, size(RGB))
+    RGB .= upres_rgb
+end
