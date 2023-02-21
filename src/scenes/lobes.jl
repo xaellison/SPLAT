@@ -11,12 +11,12 @@ function main()
 	out = nothing
 	width = 1024
 	height = 1024
- 	for frame in 1:12
+ 	for frame in 1:3
 	@sync CUDA.NVTX.@range "frame $frame" begin	# Tracing params
 	    dλ = 25f0
 	    λ_min = 400.0f0
 	    λ_max = 700.0f0
-	    depth = 5
+	    depth = 3
 		forward_upscale = 4
 		backward_upscale = 8
 		reclaim_after_iter=true
@@ -47,9 +47,6 @@ function main()
 		light_size = 1024
 		lights = [
 			RectLight(ℜ³(1, 0, 0), ℜ³(-1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, light_size, light_size),
-			RectLight(ℜ³(-1, 0, 0), ℜ³(1, 0, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(0, 1, 0) * 0.3, light_size, light_size),
-			RectLight(ℜ³(0, 0, 1), ℜ³(0, 0, -1), ℜ³(0, 1, 0) * 0.3, ℜ³(1, 0, 0) * 0.3, light_size, light_size),
-			RectLight(ℜ³(0, 0, -1), ℜ³(0, 0, 1), ℜ³(0, 1, 0) * 0.3, ℜ³(1, 0, 0) * 0.3, light_size, light_size),
 		]
 
 		function my_moving_camera()
@@ -62,12 +59,19 @@ function main()
 	    end
 
 	    cam = my_moving_camera()
-
+		forward_hitter = ExperimentalHitter3(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights))#, tris, bounding_volumes, bounding_volumes_members)
+		backward_hitter = ExperimentalHitter3(CuArray, height * width ÷ (backward_upscale ^ 2))#, tris, bounding_volumes, bounding_volumes_members)
+ 		
+		#forward_hitter = DPBVHitter(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights), tris, bounding_volumes, bounding_volumes_members)
+		#backward_hitter = DPBVHitter(CuArray, height * width ÷ (backward_upscale ^ 2), tris, bounding_volumes, bounding_volumes_members)
+ 		#forward_hitter = BoundingVolumeHitter(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights), bounding_volumes, bounding_volumes_members)
+		#backward_hitter = BoundingVolumeHitter(CuArray, height * width ÷ (backward_upscale ^ 2), bounding_volumes, bounding_volumes_members)
+ 
 		trace_kwargs = Dict{Symbol, Any}()
-		@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max, bounding_volumes, bounding_volumes_members
+		@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max, forward_hitter, backward_hitter
 		trace_kwargs = merge(basic_params, trace_kwargs)
 		@info "start..."
-		CUDA.@time RGB = trace!(ExperimentalTracer, ExperimentalHitter2, ExperimentalImager; intensity=1f0, iterations_per_frame=4, trace_kwargs...)
+		CUDA.@time RGB = trace!(ExperimentalTracer, ExperimentalImager2; intensity=1f0, iterations_per_frame=1, trace_kwargs...)
 
 		save("out/lobes/$(lpad(frame, 3, "0")).png", reshape(Array(RGB), (height, width)))
 	end

@@ -262,8 +262,9 @@ end
 
 function trace!(
     tracer_type::Type{T},
-    hitter_type::Type{H},
     imager_type::Type{I};
+    forward_hitter,
+    backward_hitter,
     cam,
     lights,
     forward_upscale,
@@ -293,13 +294,9 @@ function trace!(
         let
         tex = tex_f()
         # initialize rays for forward tracing
-        @info "ray init"
         rays = rays_from_lights(lights, forward_upscale)
         
         
-        #@time hitter = BoundingVolumeHitter(CuArray, rays, bounding_volumes, bounding_volumes_members)
-        #@time hitter = DPBVHitter(CuArray, rays, tris, bounding_volumes, bounding_volumes_members)
-        hitter = H(CuArray, rays)
         tracer = T(CuArray, rays, forward_upscale)
 
         spectrum, retina_factor = _spectrum_datastructs(CuArray, λ_min:dλ:λ_max)
@@ -314,7 +311,7 @@ function trace!(
 
         array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
         run_evolution!(
-            hitter,
+            forward_hitter,
             tracer;
             basic_params...,
             array_kwargs...,
@@ -332,9 +329,6 @@ function trace!(
         ray_generator(x, y, λ, dv) = camera_ray(cam, height ÷ backward_upscale, width ÷ backward_upscale, x, y, λ, dv)
         rays = wrap_ray_gen(ray_generator, height ÷ backward_upscale, width ÷ backward_upscale)
 
-        #@time hitter = DPBVHitter(CuArray, rays, tris, bounding_volumes, bounding_volumes_members)
-        #@time hitter = BoundingVolumeHitter(CuArray, rays, bounding_volumes, bounding_volumes_members)
-        hitter = H(CuArray, rays)
         tracer = T(CuArray, rays, backward_upscale)
 
         basic_params = Dict{Symbol,Any}()
@@ -345,8 +339,8 @@ function trace!(
         @pack! array_kwargs = tris, n_tris, rays, spectrum, retina_factor, RGB3, RGB, rays
         array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
 
-        CUDA.NVTX.@range "evolver" begin CUDA.@sync begin run_evolution!(
-            hitter,
+        NVTX.@range "evolver" begin CUDA.@sync begin run_evolution!(
+            backward_hitter,
             tracer;
             reorder=true,
             basic_params...,
@@ -355,7 +349,7 @@ function trace!(
 
         wait(tex_task)
             
-        CUDA.NVTX.@range "shady" begin CUDA.@sync begin continuum_shade!(I(); tracer = tracer, tex=tex, basic_params..., array_kwargs...) end end
+        NVTX.@range "shady" begin CUDA.@sync begin continuum_shade!(I(); tracer = tracer, tex=tex, basic_params..., array_kwargs...) end end
         #@async unsafe_destroy!(tex)
         @unpack RGB = array_kwargs
     	if frame_iter == 1

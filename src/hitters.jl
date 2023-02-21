@@ -58,7 +58,7 @@ function next_hit_kernel(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray
         end
     end
 
-    operand = unsafe_encode(min_val, UInt32(arg_min))
+    operand = monotonic_reinterpret(UInt64, (min_val, UInt32(arg_min)))
     CUDA.@atomic dest[dest_idx] = min(dest[dest_idx], operand)
     return nothing
 end
@@ -77,7 +77,7 @@ function next_hit!(tracer, hitter::ExperimentalHitter, rays, n_tris)
     blocks = (cld(length(rays), threads), cld(length(n_tris), threads))
     kernel(my_args...; blocks = blocks, threads = threads, shmem = get_shmem(threads))
     dest_view = @view tracer.hit_idx[1:length(rays)]
-    dest_view .= unsafe_decode.(src_view)
+    dest_view .= retreive_arg.(src_view)
     return
 end
 
@@ -130,8 +130,8 @@ function next_hit_kernel2(rays :: AbstractArray{R}, n_tris :: AbstractArray{X}, 
         end 
 
         # r should be its original value - upload
-        operand = unsafe_encode(min_val, UInt32(arg_min))
-        #CUDA.@atomic dest[ray_idx] = min(dest[ray_idx], operand)
+        operand = monotonic_reinterpret(UInt64, (min_val, UInt32(arg_min)))
+        CUDA.@atomic dest[ray_idx] = min(dest[ray_idx], operand)
     end
     return nothing
 end
@@ -156,7 +156,7 @@ function next_hit!(tracer, hitter::ExperimentalHitter2, rays, n_tris)
     blocks = (cld(length(rays), threads), cld(length(n_tris), threads))
     kernel(my_args...; blocks = blocks, threads = threads, shmem=get_shmem(threads))
     dest_view = @view tracer.hit_idx[1:length(rays)]
-    #dest_view .= unsafe_decode.(src_view)
+    dest_view .= retreive_arg.(src_view)
     end
     return
 end
@@ -214,7 +214,7 @@ function next_hit_kernel3(rays :: AbstractArray{R}, n_tris :: AbstractArray{X}, 
     end
 
     # r should be its original value - upload
-    operand = unsafe_encode(min_val, UInt32(arg_min))
+    operand = monotonic_reinterpret(UInt64, (min_val, UInt32(arg_min)))
     CUDA.@atomic dest[ray_idx] = min(dest[ray_idx], operand)
     return nothing
 end
@@ -238,7 +238,7 @@ function next_hit!(tracer, hitter::ExperimentalHitter3, rays, n_tris)
     blocks = (cld(length(rays), threads), cld(length(n_tris), 32))
     kernel(my_args...; blocks = blocks, threads = threads)
     dest_view = @view tracer.hit_idx[1:length(rays)]
-    dest_view .= unsafe_decode.(src_view)
+    dest_view .= retreive_arg.(src_view)
     return
 end
 
@@ -300,7 +300,7 @@ function next_hit_kernel4(rays :: AbstractArray{R}, index_view, n_tris :: Abstra
         end
 
         # r should be its original value - upload
-        operand = unsafe_encode(min_val, UInt32(arg_min))
+        operand = monotonic_reinterpret(UInt64, (min_val, UInt32(arg_min)))
         if ray_idx <= length(rays)
             CUDA.@atomic dest[ray_idx] = min(dest[ray_idx], operand)
         end
@@ -379,7 +379,7 @@ function next_hit!(tracer, hitter::BoundingVolumeHitter, rays, n_tris)
     bv_count = length(hitter.bvs)
     concurrency = length(hitter.ray_queue_atomic_counters)
     device_bvs = CuArray(hitter.bvs)
-    hitter.hitter.tmp .= unsafe_encode(Inf32, UInt32(1))
+    hitter.hitter.tmp .= monotonic_reinterpret(UInt64, (Inf32, UInt32(1)))
 
     @sync begin
         for task_index in 1:concurrency
@@ -406,7 +406,7 @@ function next_hit!(tracer, hitter::BoundingVolumeHitter, rays, n_tris)
     end
 
    # @info "tests reduced -> $(tests / (length(rays) * length(n_tris)))"
-    tracer.hit_idx .= unsafe_decode.(hitter.hitter.tmp)
+    tracer.hit_idx .= retreive_arg.(hitter.hitter.tmp)
     end
     return
 end
@@ -506,7 +506,7 @@ function next_hit_kernel5(rays :: AbstractArray{R}, ray_index_view, n_tris :: Ab
         end
 
         # r should be its original value - upload
-        operand = unsafe_encode(min_val, UInt32(arg_min))
+        operand = monotonic_reinterpret(UInt64, (min_val, UInt32(arg_min)))
         if ray_idx <= length(rays)
             CUDA.@atomic dest[ray_idx] = min(dest[ray_idx], operand)
         end
@@ -547,7 +547,7 @@ function next_hit!(tracer, hitter::DPBVHitter, rays, n_tris)
     bv_count = length(hitter.bvs)
     concurrency = length(hitter.ray_queue_atomic_counters)
     device_bvs = CuArray(hitter.bvs)
-    hitter.tmp .= unsafe_encode(Inf32, UInt32(1))
+    hitter.tmp .= monotonic_reinterpret(UInt64, (Inf32, UInt32(1)))
 
     for bv_floor in 1:concurrency:bv_count
         hitter.ray_queue_atomic_counters .= 0
@@ -570,7 +570,7 @@ function next_hit!(tracer, hitter::DPBVHitter, rays, n_tris)
     end
 
    # @info "tests reduced -> $(tests / (length(rays) * length(n_tris)))"
-    tracer.hit_idx .= unsafe_decode.(hitter.tmp)
+    tracer.hit_idx .= retreive_arg.(hitter.tmp)
     end
     return
 end

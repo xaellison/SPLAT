@@ -68,14 +68,16 @@ function main()
 		lights = [
 			RectLight(water_loc + source_beam_dir * 100 , -source_beam_dir, normalize(cross(source_beam_dir, ℜ³(1,0,0))) * 25, ℜ³(25, 0, 0), light_size, light_size),
 		]
-
+		forward_hitter = DPBVHitter(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights), tris, bounding_volumes, bounding_volumes_members)
+   		backward_hitter = DPBVHitter(CuArray, height * width ÷ (backward_upscale ^ 2), tris, bounding_volumes, bounding_volumes_members)
+    
 		trace_kwargs = Dict{Symbol, Any}()
 		
-		@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max, bounding_volumes, bounding_volumes_members
+		@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max, forward_hitter, backward_hitter
 		trace_kwargs = merge(basic_params, trace_kwargs)
 		@info "start..."
 		
-		CUDA.@time RGB = trace!(ExperimentalTracer, ExperimentalHitter2, ExperimentalImager; intensity=1f0, iterations_per_frame=4, force_rand=1.0f0, trace_kwargs...)
+		CUDA.@time RGB = trace!(ExperimentalTracer, ExperimentalImager; intensity=1f0, iterations_per_frame=4, force_rand=1.0f0, trace_kwargs...)
 
 		save("out/arty/$(lpad(frame, 3, "0")).png", permutedims(reshape(Array(RGB), (height, width)), (2,1)))
 	end

@@ -39,6 +39,7 @@ struct ExperimentalHitter3 <: AbstractHitter
 end
 
 ExperimentalHitter3(A, rays) = ExperimentalHitter3(A{UInt64}(undef, size(rays)))
+ExperimentalHitter3(A, ray_length::Int) = ExperimentalHitter3(A{UInt64}(undef, ray_length))
 
 
 struct ExperimentalHitter4 <: AbstractHitter
@@ -46,6 +47,7 @@ struct ExperimentalHitter4 <: AbstractHitter
 end
 
 ExperimentalHitter4(A, rays) = ExperimentalHitter4(A{UInt64}(undef, size(rays)))
+ExperimentalHitter4(A, ray_length::Int) = ExperimentalHitter4(A{UInt64}(undef, ray_length))
 
 
 struct BoundingVolumeHitter <: AbstractHitter
@@ -57,13 +59,13 @@ struct BoundingVolumeHitter <: AbstractHitter
     hitter :: ExperimentalHitter4
 end
 
-BoundingVolumeHitter(A, rays, bvs, memberships, concurrency::Int=4) = begin
+BoundingVolumeHitter(A, ray_length::Int, bvs, memberships; concurrency::Int=4) = begin
     BoundingVolumeHitter(bvs,
                          Dict(k => A(v) for (k, v) in memberships),
                          A(zeros(Int, concurrency)),
-                         A(zeros(Int, (concurrency, length(rays)))),
-                         A(zeros(Int, (concurrency, length(rays)))),
-                         ExperimentalHitter4(A, rays)
+                         A(zeros(Int, (concurrency, ray_length))),
+                         A(zeros(Int, (concurrency, ray_length))),
+                         ExperimentalHitter4(A, ray_length)
                          )
 end
 
@@ -89,13 +91,13 @@ function pack_bv_tris(A, tris, bvs, memberships) :: Tuple{AbstractArray{Int}, Ab
     return A(host_counts), out
 end
 
-DPBVHitter(A, rays, tris, bvs, memberships, concurrency::Int=16) = begin
+DPBVHitter(A, ray_length::Int, tris, bvs, memberships; concurrency::Int=16) = begin
     DPBVHitter(bvs,
                 pack_bv_tris(A, tris, bvs, memberships)...,
                 A(zeros(Int, concurrency)),
-                A(zeros(Int, (concurrency, length(rays)))),
-                A(zeros(Int, (concurrency, length(rays)))),
-                A{UInt64}(undef, size(rays)),
+                A(zeros(Int, (concurrency, ray_length))),
+                A(zeros(Int, (concurrency, ray_length))),
+                A{UInt64}(undef, ray_length),
                 )
 end
 

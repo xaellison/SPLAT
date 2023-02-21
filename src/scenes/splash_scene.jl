@@ -9,8 +9,8 @@ include("../procedural_assets.jl")
 function main()
 	axis = ℜ³(0, 1, 0) + ℜ³(0.3, 0, 0)
 	out = nothing
-	width = 2048
-	height = 2048
+	width = 1024
+	height = 1024
 	frame_N = 180
  	for frame in 1:frame_N
 	@sync CUDA.NVTX.@range "frame $frame" begin	# Tracing params
@@ -58,20 +58,22 @@ function main()
 		cam = my_moving_camera()
 
 		#ray_generator(x, y, λ, dv) = simple_light(ℜ³(0, 1, 0), ℜ³(0, -1, 0), ℜ³(0, 0, 1) * 0.3, ℜ³(1, 0, 0) * 0.3, height, width, x, y, λ, dv)
-		light_size = 1024
+		light_size = 512
 
 		lights = [
 			RectLight(ℜ³(-50, 50, 0), ℜ³(1, -1, 0), ℜ³(14, 14, 0), ℜ³(0, 0, 20), light_size, light_size),
 			RectLight(ℜ³(50, 50, 0), ℜ³(-1, -1, 0), ℜ³(14, -14, 0), ℜ³(0, 0, 20), light_size, light_size),
 		]
-
+		forward_hitter = DPBVHitter(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights), tris, bounding_volumes, bounding_volumes_members)
+		backward_hitter = DPBVHitter(CuArray, height * width ÷ (backward_upscale ^ 2), tris, bounding_volumes, bounding_volumes_members)
+ 
 		trace_kwargs = Dict{Symbol, Any}()
 		
-		@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max, bounding_volumes, bounding_volumes_members
+		@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max, forward_hitter, backward_hitter
 		trace_kwargs = merge(basic_params, trace_kwargs)
 		@info "start..."
 		
-		CUDA.@time RGB = trace!(ExperimentalTracer, ExperimentalHitter2, ExperimentalImager; intensity=1f0, iterations_per_frame=4, force_rand=1.0f0, trace_kwargs...)
+		CUDA.@time RGB = trace!(ExperimentalTracer, ExperimentalImager; intensity=1f0, iterations_per_frame=4, force_rand=1.0f0, trace_kwargs...)
 
 		save("out/splash/$(lpad(frame, 3, "0")).png", permutedims(reshape(Array(RGB), (height, width)), (2,1)))
 	end

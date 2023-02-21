@@ -2,23 +2,24 @@
 # for all normal non-NaN values
 
 
-function unsafe_encode(f::Float32)::UInt32
+function monotonic_reinterpret(::Type{UInt32}, f::Float32)::UInt32
     # equivalent with float comparison
     #f < 0 ? ~reinterpret(UInt32, f) : reinterpret(UInt32, f) + UInt32(1<<31)
     uint = reinterpret(UInt32, f)
     uint > 1 << 31 ? ~uint : uint | UInt32(1 << 31)
 end
 
-function unsafe_encode(f::Float32, i::UInt32)::UInt64
-    return UInt64(unsafe_encode(f)) << 32 | UInt64(i)
+function monotonic_reinterpret(::Type{UInt64}, f_i :: Tuple{Float32, UInt32})::UInt64
+    f, i = f_i
+    return UInt64(monotonic_reinterpret(UInt32, f)) << 32 | UInt64(i)
 end
 
-function unsafe_decode(i64::UInt64)::UInt32
-    #TODO rename to retreive or something
+function retreive_arg(i64::UInt64)::UInt32
+    # for an UInt64 encoding a (max/min, argmax/argmin), return argmax/argmin
     return UInt32(i64 ⊻ (i64 >> 32 << 32))
 end
 
-function unsafe_decode(i32::UInt32)::Float32
+function monotonic_reinterpret(::Type{Float32}, i32::UInt32)::Float32
     flipped_sign = i32 >> 31 << 31
     if flipped_sign == 0
         # originally, sign 0 positive, so this is negative, restore
@@ -38,8 +39,8 @@ end
 
 function test_reversibility()
     A = test_array()
-    if !all(unsafe_decode.(unsafe_encode.(A)) .== A)
-        failure = findfirst(i -> unsafe_decode(unsafe_encode(A[i])) != A[i], 1:length(A))
+    if !all(monotonic_reinterpret.(Float32, monotonic_reinterpret.(UInt32, A)) .== A)
+        failure = findfirst(i -> monotonic_reinterpret(Float32, monotonic_reinterpret(UInt32, A[i])) != A[i], 1:length(A))
         @error "Fails for float = $(A[failure])"
         return false
     end
@@ -50,8 +51,8 @@ function test_comparison()
     A = test_array()
     B = test_array()
     try
-        e_A = map(unsafe_encode, A)
-        e_B = map(unsafe_encode, B)
+        e_A = map(a->monotonic_reinterpret(UInt32, a), A)
+        e_B = map(b->monotonic_reinterpret(UInt32, b), B)
         for (x, e_x) in zip(A, e_A)
             for (y, e_y) in zip(B, e_B)
                 if (x < y) != (e_x < e_y)
@@ -75,8 +76,8 @@ function test_comparison2()
     A = UInt32.(rand(UInt32, N) .% (1 << 24) .+ rand(UInt32, N) .% (1 << 31))
     B = UInt32.(rand(UInt32, N) .% (1 << 24) .+ rand(UInt32, N) .% (1 << 31))
     try
-        e_A = map(unsafe_decode, A)
-        e_B = map(unsafe_decode, B)
+        e_A = map(a->monotonic_reinterpret(Float32, a), A)
+        e_B = map(b->monotonic_reinterpret(Float32, b), B)
         for (x, e_x) in zip(A, e_A)
             for (y, e_y) in zip(B, e_B)
                 if !isnan(e_x) & !isnan(e_y) & (x < y) != (e_x < e_y)
@@ -95,6 +96,6 @@ function test_comparison2()
 end
 
 using BenchmarkTools
-@benchmark unsafe_encode(f) setup = begin
+@benchmark monotonic_reinterpret(UInt32, f) setup = begin
     f = -rand(Float32) .- 0.5f0
 end evals = 100 samples = 10
