@@ -10,7 +10,7 @@ Shitty bounding volume method.
     triangle overlaps with the bounding sphere of the cluster.
 """
 function cluster_fuck(tris, N)
-    @info "Clustering $(length(tris)) tris"
+   # @info "Clustering $(length(tris)) tris"
     # annoying matrix for clustering
     data = zeros(Float32, (3, length(tris)))
     for (n, T) in enumerate(tris)
@@ -29,7 +29,7 @@ function cluster_fuck(tris, N)
         push!(clusters[c], T)
     end
     ℜ³_centers = ℜ³.(result.centers[1, :], result.centers[2, :], result.centers[3, :])
-    @info Set(result.assignments)
+    #@info Set(result.assignments)
     radii = [maximum(norm(circumcenter(T) - ℜ³_centers[c]) + circumscribing_sphere(T).radius for T in clusters[c]) for c in 1:N]
     spheres = Sphere.(ℜ³_centers, radii)
     sort!(spheres)
@@ -66,3 +66,4 @@ function load_and_cluster_fuck(path::String, N)
 end
 
 #@time load_and_cluster_fuck("objs\\artemis_smaller.obj", 3);
+

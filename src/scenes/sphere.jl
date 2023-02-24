@@ -1,5 +1,5 @@
 # RUN FROM /
-using Revise, LazyArrays, Parameters, GLMakie, CUDA, KernelAbstractions , CUDAKernels, NVTX
+using Revise, LazyArrays, Parameters, CairoMakie, CUDA, KernelAbstractions , CUDAKernels, NVTX
 
 include("../geo.jl")
 include("../skys.jl")
@@ -80,7 +80,7 @@ function main()
 
 	    
 
-	if false
+	if true
 		# For nvvprof:
 		NVTX.@range "warmup" runme(1)
 		NVTX.@range "run 1" runme(1)
