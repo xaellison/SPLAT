@@ -53,6 +53,8 @@ function atomic_spectrum_kernel(
     t = tris[idx]
     if adr.status == RAY_STATUS_DIFFUSE
         for (n_λ, λ) in enumerate(spectrum)
+            i_, j_ = 0, 0
+            tmp = 0.0f0
             for x in δx
                 for y in δy
                     r = expand(adr, λ, adr.x + x, adr.y + y)
@@ -65,7 +67,15 @@ function atomic_spectrum_kernel(
                         j = clamp(Int(ceil(v * h)), 1, h)
 
                         intensity = cosine_shading(r, t)
-                        CUDA.@atomic tex[i, j, n_λ] += intensity
+                        
+                        # if not first iter and new write index
+                        if !(i_ == 0 && j == 0) && (i != i_ || j != j_)
+                            CUDA.@atomic tex[i_, j_, n_λ] += tmp# intensity
+                            tmp = 0
+                            i_, j_ = i, j
+                        end
+                        tmp += intensity
+
                     end
                 end
             end
