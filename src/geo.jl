@@ -19,6 +19,24 @@ const FTri = SVector{10,ℜ³}
 
 tri_from_ftri(ftri) = Tri(ftri[1], ftri[2], ftri[3], ftri[4])
 
+
+struct BVBox
+    min::ℜ³
+    max::ℜ³
+end
+
+BVBox(t :: FTri) = BVBox(ℜ³(
+                        minimum(p[1] for p in t[2:4]), 
+                        minimum(p[2] for p in t[2:4]), 
+                        minimum(p[3] for p in t[2:4])
+                    ),
+                    ℜ³(
+                        maximum(p[1] for p in t[2:4]), 
+                        maximum(p[2] for p in t[2:4]), 
+                        maximum(p[3] for p in t[2:4])
+                    ))
+
+
 struct Sphere
     origin::ℜ³
     radius::Float32
@@ -333,7 +351,7 @@ function model_box(vertices)
     return (min_x, max_x, min_y, max_y, min_z, max_z)
 end
 
-function model_box(tris::Array{T}) where {T<:Union{Tri,STri,FTri}}
+function model_box(tris::AbstractArray{T}) where {T<:Union{Tri,STri,FTri}}
     min_x = minimum(map(t -> minimum(map(v -> v[1], t[2:4])), tris))
     min_y = minimum(map(t -> minimum(map(v -> v[2], t[2:4])), tris))
     min_z = minimum(map(t -> minimum(map(v -> v[3], t[2:4])), tris))

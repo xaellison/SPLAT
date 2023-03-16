@@ -50,8 +50,8 @@ ExperimentalHitter4(A, rays) = ExperimentalHitter4(A{UInt64}(undef, size(rays)))
 ExperimentalHitter4(A, ray_length::Int) = ExperimentalHitter4(A{UInt64}(undef, ray_length))
 
 
-struct BoundingVolumeHitter <: AbstractHitter
-    bvs :: AbstractArray{Sphere}
+struct BoundingVolumeHitter{BV} <: AbstractHitter
+    bvs :: AbstractArray{BV}
     bv_tris :: Dict{Int, AbstractArray{Int}}
     ray_queue_atomic_counters :: AbstractArray{Int}
     ray_queues :: AbstractArray{Int}
@@ -59,8 +59,8 @@ struct BoundingVolumeHitter <: AbstractHitter
     hitter :: ExperimentalHitter4
 end
 
-BoundingVolumeHitter(A, ray_length::Int, bvs, memberships; concurrency::Int=4) = begin
-    BoundingVolumeHitter(bvs,
+BoundingVolumeHitter(A, ray_length::Int, bvs :: AbstractArray{BV}, memberships; concurrency::Int=4) where BV = begin
+    BoundingVolumeHitter{BV}(bvs,
                          Dict(k => A(v) for (k, v) in memberships),
                          A(zeros(Int, concurrency)),
                          A(zeros(Int, (concurrency, ray_length))),
@@ -70,8 +70,8 @@ BoundingVolumeHitter(A, ray_length::Int, bvs, memberships; concurrency::Int=4) =
 end
 
 # dynamic programming bounding volume
-struct DPBVHitter <: AbstractHitter
-    bvs :: AbstractArray{Sphere}
+struct DPBVHitter{BV} <: AbstractHitter
+    bvs :: AbstractArray{BV}
     bv_tri_count :: AbstractArray{Int}
     bv_tris :: AbstractArray{Int}
     ray_queue_atomic_counters :: AbstractArray{Int}
@@ -91,8 +91,9 @@ function pack_bv_tris(A, tris, bvs, memberships) :: Tuple{AbstractArray{Int}, Ab
     return A(host_counts), out
 end
 
-DPBVHitter(A, ray_length::Int, tris, bvs, memberships; concurrency::Int=16) = begin
-    DPBVHitter(bvs,
+DPBVHitter(A, ray_length::Int, tris, bvs::AbstractArray{BV}, memberships; concurrency::Int=16) where BV = begin
+    @assert concurrency <= length(bvs)
+    DPBVHitter{BV}(bvs,
                 pack_bv_tris(A, tris, bvs, memberships)...,
                 A(zeros(Int, concurrency)),
                 A(zeros(Int, (concurrency, ray_length))),

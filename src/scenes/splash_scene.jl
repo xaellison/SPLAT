@@ -1,5 +1,5 @@
 # RUN FROM /
-using Revise, LazyArrays, Parameters, GLMakie, CUDA, KernelAbstractions, CUDAKernels, Random
+using Revise, LazyArrays, Parameters, GLMakie, CUDA, KernelAbstractions, CUDAKernels, Random, NVTX
 
 include("../geo.jl")
 include("../skys.jl")
@@ -13,22 +13,21 @@ function main()
 	height = 1024
 	frame_N = 180
  	for frame in 1:frame_N
-	@sync CUDA.NVTX.@range "frame $frame" begin	# Tracing params
+	@sync NVTX.@range "frame $frame" begin	# Tracing params
 	    dλ = 25f0
 	    λ_min = 400.0f0
 	    λ_max = 700.0f0
 	    depth = 5
-		forward_upscale = 2
-		backward_upscale = 2
+		forward_upscale = 1
+		backward_upscale = 1
 		reclaim_after_iter=true
-		iterations_per_frame=4
+		iterations_per_frame=1
 		intensity = 2
 		# Geometry
 
 		rips = mesh_to_FTri(load("objs/splash_scene_liquid.obj"))
 
 		arty = mesh_to_FTri(load("objs/splash_scene_artemis.obj"))
-
 
 
 		meshes = [[zero(FTri)], rips, arty]
@@ -38,7 +37,9 @@ function main()
 		R = rotation_matrix(ℜ³(0,1,0), 2 * pi * (frame / frame_N))
 		tris = map(t -> rotate(t, R), tris)
 
-		bounding_volumes, bounding_volumes_members = cluster_fuck(tris, 256)
+		#bounding_volumes, bounding_volumes_members = cluster_fuck(tris, 64)
+
+		bounding_volumes, bounding_volumes_members = bv_partition(tris, 6; verbose=true)
 
 		tex_f() = checkered_tex(32, 16, length(λ_min:dλ:λ_max)) .*0#.* 12#CUDA.zeros(Float32, width ÷2, width÷2, length(Λ))
 
@@ -48,7 +49,7 @@ function main()
 		# Forward Trace light map
 
 		function my_moving_camera()
-			camera_pos = ℜ³((0, 0, -80))
+			camera_pos = ℜ³((0, 0, -60))
 			look_at = ℜ³(0, 0, 0)
 			up = ℜ³((0.0, -1.0, 0.0))
 			FOV = 75.0 * pi / 180.0
@@ -67,6 +68,9 @@ function main()
 		forward_hitter = DPBVHitter(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights), tris, bounding_volumes, bounding_volumes_members)
 		backward_hitter = DPBVHitter(CuArray, height * width ÷ (backward_upscale ^ 2), tris, bounding_volumes, bounding_volumes_members)
  
+#		forward_hitter = BoundingVolumeHitter(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights), bounding_volumes, bounding_volumes_members)
+#		backward_hitter = BoundingVolumeHitter(CuArray, height * width ÷ (backward_upscale ^ 2), bounding_volumes, bounding_volumes_members)
+
 		trace_kwargs = Dict{Symbol, Any}()
 		
 		@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max, forward_hitter, backward_hitter

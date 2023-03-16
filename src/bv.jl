@@ -1,4 +1,4 @@
-using Clustering
+using Clustering, Statistics
 
 """
 Shitty bounding volume method.
@@ -17,7 +17,7 @@ function cluster_fuck(tris, N)
         data[:, n] = circumcenter(T)
     end
     
-    result = kmeans(data, N, tol=1e2)
+    result = kmeans(data, N, tol=1e5)
     
     # initialize clusters so each Tri in one cluster
     clusters = Dict()
@@ -63,6 +63,61 @@ end
 function load_and_cluster_fuck(path::String, N)
     tris = mesh_to_FTri(load(path))
     cluster_fuck(tris, N)
+end
+
+function spatial_partition(tris, depth::Int=0)
+    # returns a list of views of `tris` bisected by half-planes `depth` times, with the planes' orientations rotating with `depth`
+    if depth < 0
+        return error("negative recursion")
+    end
+    
+    if depth == 0
+        return [tris]
+    end
+
+    dimension = depth % 3 + 1
+    mid_value = median(mean(T[n][dimension] for n in 2:4) for T in tris)
+
+    branch_indices = map(T -> minimum(T[n][dimension] for n in 2:4) <= mid_value, tris)
+    tri_view = @view tris[branch_indices]
+    lefties = spatial_partition(tri_view, depth - 1)
+
+    branch_indices = map(T -> maximum(T[n][dimension] for n in 2:4) >= mid_value, tris)
+    tri_view = @view tris[branch_indices]
+    righties = spatial_partition(tri_view, depth - 1)
+    
+    return vcat(lefties, righties)
+end
+
+function bv_partition(tris, depth=6; verbose::Bool=false)
+    partitions = spatial_partition(Array(tris), depth)
+	bounding_volumes = collect(BVBox(ℜ³(
+								minimum(minimum(p[1] for p in t[2:4]) for t in tris), 
+								minimum(minimum(p[2] for p in t[2:4]) for t in tris), 
+								minimum(minimum(p[3] for p in t[2:4]) for t in tris), 
+							),
+							ℜ³(
+								maximum(maximum(p[1] for p in t[2:4]) for t in tris), 
+								maximum(maximum(p[2] for p in t[2:4]) for t in tris), 
+								maximum(maximum(p[3] for p in t[2:4]) for t in tris), 
+							)) for tris in partitions)
+	bounding_volumes_members = Dict(n => p.indices[1] for (n, p)  in enumerate(partitions))
+
+    if verbose
+        @info """
+                Bounding Volume Summary:
+                Tri count = $(length(tris))
+                Number of partitions = $(length(partitions))
+                Overcount factor = $(sum(map(length, partitions)) / length(tris))
+                Mean partition size = $(mean(map(length, partitions)))    
+                Median partition size = $(median(map(length, partitions)))    
+                Min partition size = $(minimum(map(length, partitions)))    
+                Max partition size = $(maximum(map(length, partitions)))    
+                Std partition size = $(std(map(length, partitions)))    
+            """
+    end
+
+    return bounding_volumes, bounding_volumes_members
 end
 
 #@time load_and_cluster_fuck("objs\\artemis_smaller.obj", 3);

@@ -1,5 +1,5 @@
 # RUN FROM /
-using Revise, LazyArrays, Parameters, CairoMakie, CUDA, KernelAbstractions , CUDAKernels, NVTX
+using Revise, LazyArrays, Parameters, GLMakie, CUDA, KernelAbstractions , CUDAKernels, NVTX
 
 include("../geo.jl")
 include("../skys.jl")
@@ -15,20 +15,23 @@ function main()
     λ_max = 700.0f0
     depth = 3
     ITERS = 1
-	forward_upscale = 8
+	forward_upscale = 4
 	backward_upscale = 4
 	# Geometry
 
 	obj_path = "objs/icos.obj"
 	
 	glass_sphere = mesh_to_FTri(load(obj_path))
+	
+	solid_sphere = mesh_to_FTri(load(obj_path))
+	solid_sphere = map(t -> translate(t, ℜ³(1, 0, -4) ), solid_sphere)
 
-	meshes = [[zero(FTri)], glass_sphere, stage()]
+	meshes = [[zero(FTri)], glass_sphere, solid_sphere]
 	first_diffuse = 1 + 1 + length(glass_sphere)
 	tris = CuArray(foldl(vcat, meshes))
 	
 
-	tex_f() = checkered_tex(48, 16, length(λ_min:dλ:λ_max)) .* 12
+	tex_f() = checkered_tex(32, 16, length(λ_min:dλ:λ_max)) .* 12
 
 	basic_params = Dict{Symbol, Any}()
 	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, forward_upscale, backward_upscale
@@ -48,13 +51,16 @@ function main()
 		RectLight(ℜ³(0, 0, 8), ℜ³(0, 0, -1), ℜ³(1, 0, 0), ℜ³(0, 1, 0), height, width),
 	]
 
-	bounding_volumes, bounding_volumes_members = cluster_fuck(Array(tris), 2)
-	forward_hitter = DPBVHitter(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights), tris, bounding_volumes, bounding_volumes_members; concurrency=2)
-    backward_hitter = DPBVHitter(CuArray, height * width ÷ (backward_upscale ^ 2), tris, bounding_volumes, bounding_volumes_members; concurrency=2)
+	#bounding_volumes, bounding_volumes_members = cluster_fuck(Array(tris), 4)
+
+	bounding_volumes, bounding_volumes_members = bv_partition(tris, 3; verbose=true)
+
+	forward_hitter = DPBVHitter(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights), tris, bounding_volumes, bounding_volumes_members; concurrency=8)
+    backward_hitter = DPBVHitter(CuArray, height * width ÷ (backward_upscale ^ 2), tris, bounding_volumes, bounding_volumes_members; concurrency=8)
     
 	#forward_hitter = ExperimentalHitter3(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights))#, tris, bounding_volumes, bounding_volumes_members)
     #backward_hitter = ExperimentalHitter3(CuArray, height * width ÷ (backward_upscale ^ 2))#, tris, bounding_volumes, bounding_volumes_members)
-    
+   
 	#forward_hitter = BoundingVolumeHitter(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights), bounding_volumes, bounding_volumes_members)
 	#backward_hitter = BoundingVolumeHitter(CuArray, height * width ÷ (backward_upscale ^ 2), bounding_volumes, bounding_volumes_members)
  
@@ -80,7 +86,7 @@ function main()
 
 	    
 
-	if true
+	if false
 		# For nvvprof:
 		NVTX.@range "warmup" runme(1)
 		NVTX.@range "run 1" runme(1)

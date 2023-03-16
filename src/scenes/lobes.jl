@@ -1,5 +1,5 @@
 # RUN FROM /
-using Revise, LazyArrays, Parameters, GLMakie, CUDA, KernelAbstractions, Random
+using Revise, LazyArrays, Parameters, GLMakie, CUDA, KernelAbstractions, Random, NVTX
 
 include("../geo.jl")
 include("../skys.jl")
@@ -12,7 +12,7 @@ function main()
 	width = 1024
 	height = 1024
  	for frame in 1:3
-	@sync CUDA.NVTX.@range "frame $frame" begin	# Tracing params
+	@sync NVTX.@range "frame $frame" begin	# Tracing params
 	    dλ = 25f0
 	    λ_min = 400.0f0
 	    λ_max = 700.0f0
@@ -33,7 +33,7 @@ function main()
 		meshes = [[zero(FTri)], lobe1, lobe2]
 		first_diffuse = 1 + length(lobe1) + 1
 		tris = foldl(vcat, meshes)
-		bounding_volumes, bounding_volumes_members = cluster_fuck(tris, 64)
+		bounding_volumes, bounding_volumes_members = cluster_fuck(tris, 512)
 
 		Λ = CuArray(collect(λ_min:dλ:λ_max))
 		tex_f() = checkered_tex(32, 16, length(λ_min:dλ:λ_max)) .*2#.* 12#CUDA.zeros(Float32, width ÷2, width÷2, length(Λ))
@@ -59,11 +59,11 @@ function main()
 	    end
 
 	    cam = my_moving_camera()
-		forward_hitter = ExperimentalHitter3(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights))#, tris, bounding_volumes, bounding_volumes_members)
-		backward_hitter = ExperimentalHitter3(CuArray, height * width ÷ (backward_upscale ^ 2))#, tris, bounding_volumes, bounding_volumes_members)
+		#forward_hitter = ExperimentalHitter3(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights))#, tris, bounding_volumes, bounding_volumes_members)
+		#backward_hitter = ExperimentalHitter3(CuArray, height * width ÷ (backward_upscale ^ 2))#, tris, bounding_volumes, bounding_volumes_members)
  		
-		#forward_hitter = DPBVHitter(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights), tris, bounding_volumes, bounding_volumes_members)
-		#backward_hitter = DPBVHitter(CuArray, height * width ÷ (backward_upscale ^ 2), tris, bounding_volumes, bounding_volumes_members)
+		forward_hitter = DPBVHitter(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights), tris, bounding_volumes, bounding_volumes_members; concurrency=4)
+		backward_hitter = DPBVHitter(CuArray, height * width ÷ (backward_upscale ^ 2), tris, bounding_volumes, bounding_volumes_members; concurrency=4)
  		#forward_hitter = BoundingVolumeHitter(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights), bounding_volumes, bounding_volumes_members)
 		#backward_hitter = BoundingVolumeHitter(CuArray, height * width ÷ (backward_upscale ^ 2), bounding_volumes, bounding_volumes_members)
  

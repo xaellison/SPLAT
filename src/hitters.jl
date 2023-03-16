@@ -337,7 +337,7 @@ end
 
 
 
-function queue_rays_kernel(rays, spheres, queue_index, queues, queue_counter)
+function queue_rays_kernel(rays, bvs :: AbstractArray{BV}, queue_index, queues, queue_counter) where BV
     
     ray_idx = threadIdx().x + (blockIdx().y - 1) * blockDim().x
     r = zero(FastRay)
@@ -346,7 +346,7 @@ function queue_rays_kernel(rays, spheres, queue_index, queues, queue_counter)
     end
     
     
-    bv = spheres[1]
+    bv = bvs[1]
 
     distance = get_hit((Int32(queue_index), bv), r)[1]
     condition = ! isinf(distance) && distance > 0
@@ -371,7 +371,7 @@ function queue_rays_kernel(rays, spheres, queue_index, queues, queue_counter)
 end
 
 
-function next_hit!(tracer, hitter::BoundingVolumeHitter, rays, n_tris)
+function next_hit!(tracer, hitter::BoundingVolumeHitter{BV}, rays, n_tris) where BV
     Q_block_size = 256
 
     CUDA.@sync begin
@@ -539,7 +539,7 @@ function dp_launcher_kernel(bv_floor, child_threads, child_shmem, bv_tri_count, 
 end
 
 
-function next_hit!(tracer, hitter::DPBVHitter, rays, n_tris)
+function next_hit!(tracer, hitter::DPBVHitter{BV}, rays, n_tris) where BV
     Q_block_size = 256
 
     CUDA.@sync begin
@@ -564,7 +564,6 @@ function next_hit!(tracer, hitter::DPBVHitter, rays, n_tris)
             @cuda threads=concurrency dp_launcher_kernel(bv_floor, child_threads, child_shmem, hitter.bv_tri_count, hitter.bv_tris, hitter.ray_queue_atomic_counters, rays, hitter.ray_queues, n_tris, hitter.tmp, Int32(1))
             
         end
-
 
        # tests += sum(Array(hitter.ray_queue_atomic_counters))
     end

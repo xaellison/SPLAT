@@ -80,6 +80,27 @@ function get_hit(
     end
 end
 
+function get_hit(i_B::Tuple{Int32,BVBox}, ray::AbstractRay; kwargs...)
+    # https://tavianator.com/2022/ray_box_boundary.html
+    # WARNING - does not return distance to hit, just whether or not a hit exists!
+    i, B = i_B
+    
+    t_min = 0.0f0
+    t_max = Inf32
+    
+    for dim in 1:3
+        t1 = (B.min[dim] - ray.pos[dim]) / ray.dir[dim]
+        t2 = (B.max[dim] - ray.pos[dim]) / ray.dir[dim]
+        t_min = max(t_min, min(t1, t2))
+        t_max = min(t_max, max(t1, t2))
+    end
+    
+    if t_min < t_max
+        return (1.0f0, i, B)
+    else
+        return (Inf32, one(Int32), B)
+    end
+end
 
 ## Ray evolvers
 

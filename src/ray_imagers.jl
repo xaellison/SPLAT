@@ -75,6 +75,44 @@ function atomic_spectrum_kernel(
 end
 
 
+function atomic_spectrum_kernel2(
+    rays::AbstractArray{ADRay},
+    tris,
+    first_diffuse_index,
+    spectrum,
+    δx,
+    δy,
+    tex,
+)
+    adr = rays[blockIdx().x]
+    if adr.status != RAY_STATUS_DIFFUSE
+        return nothing
+    end
+    expansion_indices = CartesianIndices((length(δx), length(δy), length(spectrum)))
+    
+    t = tris[blockIdx().x]
+    x = δx[expansion_indices[threadIdx().x][1]]
+    y = δy[expansion_indices[threadIdx().x][2]]
+    n_λ = expansion_indices[threadIdx().x][3]
+    λ = spectrum[n_λ]
+    
+    r = expand(adr, λ, adr.x + x, adr.y + y)
+    u, v = tex_uv(r, t)
+
+    if !isnan(u) && !isnan(v) && !isinf(u) && !isinf(v)
+        # it's theoretically possible u, v could come back as zero
+        w, h = size(tex)[1:2]
+        i = clamp(Int(ceil(u * w)), 1, w)
+        j = clamp(Int(ceil(v * h)), 1, h)
+
+        intensity = cosine_shading(r, t)
+        CUDA.@atomic tex[i, j, n_λ] += intensity
+    end
+
+    nothing
+end
+
+
 function continuum_light_map!(;
     tracer,
     tris,
@@ -91,6 +129,32 @@ function continuum_light_map!(;
     # TODO: remove alloc
     rays .= final_evolution.(rays, tracer.hit_idx, tri_view)
     @cuda blocks = length(rays) ÷ 256 threads = 256 atomic_spectrum_kernel(
+        rays,
+        tri_view,
+        first_diffuse,
+        spectrum,
+        tracer.δ,
+        tracer.δ,
+        tex,
+    )
+end
+
+function continuum_light_map2!(;
+    tracer,
+    tris,
+    rays,
+    n_tris,
+    spectrum,
+    first_diffuse,
+    dλ,
+    tex,
+    kwargs...,
+)
+    tri_view = @view tris[tracer.hit_idx]
+    @assert length(rays) % 256 == 0
+    # TODO: remove alloc
+    rays .= final_evolution.(rays, tracer.hit_idx, tri_view)
+    @cuda blocks = length(rays) threads = prod((length(tracer.δ), length(tracer.δ), length(spectrum))) atomic_spectrum_kernel2(
         rays,
         tri_view,
         first_diffuse,
