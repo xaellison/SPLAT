@@ -23,12 +23,20 @@ function main()
 	
 	glass_sphere = mesh_to_FTri(load(obj_path))
 	
+	
 	solid_sphere = mesh_to_FTri(load(obj_path))
 	solid_sphere = map(t -> translate(t, ℜ³(1, 0, -4) ), solid_sphere)
+	
+	glass_sphere2 = mesh_to_FTri(load(obj_path))
+	glass_sphere2 = map(t -> translate(t, ℜ³(0, 2, 0) ), glass_sphere2)
+	
+	solid_sphere2 = mesh_to_FTri(load(obj_path))
+	solid_sphere2 = map(t -> translate(t, ℜ³(1, 2, -4) ), solid_sphere2)
 
-	meshes = [[zero(FTri)], glass_sphere, solid_sphere]
-	first_diffuse = 1 + 1 + length(glass_sphere)
-	tris = CuArray(foldl(vcat, meshes))
+	meshes = [[zero(FTri)], glass_sphere, glass_sphere2, solid_sphere, solid_sphere2]
+	first_diffuse = 1 + 1 + length(glass_sphere) * 2
+	host_tris = foldl(vcat, meshes)
+	tris = CuArray(host_tris)
 	
 
 	tex_f() = checkered_tex(32, 16, length(λ_min:dλ:λ_max)) .* 12
@@ -84,26 +92,20 @@ function main()
 	# Just don't forget to call `display(fig)` before the loop
 	# and without record, one needs to insert a yield to yield to the render task
 
-	    
+	runme(1)
+	runme(1)
+	hm[3] = runme(1)
+	display(fig)
 
-	if false
-		# For nvvprof:
-		NVTX.@range "warmup" runme(1)
-		NVTX.@range "run 1" runme(1)
-		NVTX.@range "run 2" runme(1)
-	else
-		runme(1)
-		runme(1)
-		hm[3] = runme(1)
-		display(fig)
-		@time for i in 1:40
-		#    events(hm).mouseposition |> println
-			tv = @view tris[2:first_diffuse-1]
-		    hm[3] = runme(1) # update data
-			#oscillate(tv) = translate(tv, ℜ³(cos(i / 20) / 50, 0, sin(i / 20) / 50))
-			#tv .= oscillate.(tv)
-		    yield()
-		end
+
+	@time for i in 1:40
+	#    events(hm).mouseposition |> println
+		tv = @view host_tris[2:first_diffuse-1]
+		oscillate(tv) = translate(tv, ℜ³(cos(i / 20) / 50, 0, sin(i / 20) / 50))
+		tv .= oscillate.(tv)
+		
+		hm[3] = runme(1) # update data
+		yield()
 	end
 end
 CUDA.@profile main()

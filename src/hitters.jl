@@ -551,7 +551,7 @@ function next_hit!(tracer, hitter::DPBVHitter{BV}, rays, n_tris) where BV
 
     for bv_floor in 1:concurrency:bv_count
         hitter.ray_queue_atomic_counters .= 0
-        bv_view = @view device_bvs[bv_floor:bv_floor + concurrency - 1]
+        bv_view = @view device_bvs[bv_floor: min(length(device_bvs), bv_floor + concurrency - 1)]
         # todo: replace loop with blocks
         let#for task_index in 1:concurrency
             hitter.ray_queue_atomic_counters .= 0

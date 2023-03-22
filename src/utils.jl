@@ -80,15 +80,28 @@ struct DPBVHitter{BV} <: AbstractHitter
     tmp::AbstractArray{UInt64}
 end
 
-function pack_bv_tris(A, tris, bvs, memberships) :: Tuple{AbstractArray{Int}, AbstractArray{Int}}
+function pack_bv_tris(A, tris, bvs, memberships; max_overcount_factor=4.0) :: Tuple{AbstractArray{Int}, AbstractArray{Int}}
     # for 100k tris, 256 bvs, `out` will take up 195 MB
-    out = A{Int}(undef, length(bvs), length(tris))
+    out = A{Int}(undef, length(bvs), Int(ceil(length(tris) / length(bvs) * max_overcount_factor)))
     host_counts = zeros(Int, length(bvs))
     for (k, v) in memberships
-        out[k, 1:length(v)] .= A(sort(v))
+        out_view = @view out[k, 1:length(v)] 
+        out_view .= A(sort(v))
         host_counts[k] = length(v)
     end 
     return A(host_counts), out
+end
+
+function repack!(hitter, bvs, memberships)
+    hitter.bvs .= bvs
+    host_counts = zeros(Int, length(bvs))
+    for (k, v) in memberships
+        out_view = @view hitter.bv_tris[k, 1:length(v)]
+        copy!(out_view, sort(v))
+ #       out_view .= CuArray(sort(v))
+        host_counts[k] = length(v)
+    end
+    hitter.bv_tri_count .= CuArray(host_counts)
 end
 
 DPBVHitter(A, ray_length::Int, tris, bvs::AbstractArray{BV}, memberships; concurrency::Int=16) where BV = begin

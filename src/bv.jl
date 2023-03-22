@@ -1,4 +1,4 @@
-using Clustering, Statistics
+using Clustering, Statistics, Random
 
 """
 Shitty bounding volume method.
@@ -86,7 +86,7 @@ function spatial_partition(tris, depth::Int=0)
     tri_view = @view tris[branch_indices]
     righties = spatial_partition(tri_view, depth - 1)
     
-    return vcat(lefties, righties)
+    return shuffle(vcat(lefties, righties))
 end
 
 function bv_partition(tris, depth=6; verbose::Bool=false)

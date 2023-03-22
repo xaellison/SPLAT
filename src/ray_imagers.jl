@@ -410,7 +410,7 @@ function shade_tex4_kernel(
         thread_out = RGBf(x,x,x)
     end
     if adr.status == RAY_STATUS_DIFFUSE
-        for i_λ in 1:length(Λ)
+        for i_λ in eachindex(Λ)
         λ = Λ[i_λ]
         r = expand(adr, λ, adr.x + δx[threadIdx().y], adr.y + δy[threadIdx().z])
 

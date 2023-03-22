@@ -270,11 +270,11 @@ function run_evolution!(
     if reorder
         indices = map(r->r.dest, rays)
         # `copy!` is faster but causes nvvprof to fail on windows
-        #copy!(tracer.ray_swap, rays)
-        tracer.ray_swap .= rays
+        copy!(tracer.ray_swap, rays)
+        #tracer.ray_swap .= rays
         dest_view = @view rays[indices]
-        #copy!(dest_view, tracer.ray_swap)
-        dest_view .= tracer.ray_swap
+        copy!(dest_view, tracer.ray_swap)
+        #dest_view .= tracer.ray_swap
     end
     # needed to realign hit_idx
     next_hit!(tracer, hitter, rays, n_tris)
@@ -299,20 +299,15 @@ function trace!(
     height,
     depth,
     first_diffuse,
-    bounding_volumes=nothing, 
-    bounding_volumes_members=nothing,
     force_rand=nothing, # 0 to force reflection, 1 to force refraction
     intensity=1.0f0,
-    iterations_per_frame=1,
-    reclaim_after_iter=false,
-   
+    iterations_per_frame=1,   
 ) where {T<:AbstractTracer,
          H<:AbstractHitter,
          I<:AbstractImager}
     out = nothing
     
     for frame_iter in 1:iterations_per_frame
-        let
         tex = tex_f()
         # initialize rays for forward tracing
         rays = rays_from_lights(lights, forward_upscale)
@@ -326,7 +321,6 @@ function trace!(
         @pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, intensity, force_rand
         n_tris = tuple.(Int32(1):Int32(length(tris)), map(tri_from_ftri, tris)) |> m -> reshape(m, 1, length(m))
 
-        Λ = CuArray(collect(λ_min:dλ:λ_max))
         array_kwargs = Dict{Symbol,Any}()
         @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor
 
@@ -378,12 +372,6 @@ function trace!(
     	else
     		out .= out .* (frame_iter - 1) / frame_iter + RGB ./ frame_iter
     	end
-        end
-        if reclaim_after_iter
-            # this costs ~10% in real time loop
-            # but hitting OOM on large renders without
-            CUDA.reclaim()
-        end
     end
     return out
 end
