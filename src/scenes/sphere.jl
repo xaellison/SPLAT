@@ -1,5 +1,5 @@
 # RUN FROM /
-using Revise, LazyArrays, Parameters, CairoMakie, CUDA, KernelAbstractions , CUDAKernels, NVTX
+using Revise, LazyArrays, Parameters, GLMakie, CUDA, KernelAbstractions , CUDAKernels, NVTX
 
 include("../geo.jl")
 include("../skys.jl")
@@ -74,6 +74,8 @@ function main()
  
 	host_RGB_A, host_RGB_B = Array{RGBf}(undef, height, width), Array{RGBf}(undef, height, width)
 	device_RGB_A, device_RGB_B = CuArray(host_RGB_A), CuArray(host_RGB_B)
+	Mem.pin(host_RGB_A)
+	Mem.pin(host_RGB_B)
 	
 	runme(i) = begin
 		trace_kwargs = Dict{Symbol, Any}()
@@ -107,20 +109,20 @@ function main()
 	tasks = Dict()
 
 	t0 = @async 1
-	tasks["B"] = t0
+	tasks["A"] = t0
 
 	@time for i in 1:40
 	#    events(hm).mouseposition |> println
 		
-		if i % 2 == 0
+		if i % 2 == 1
 			# assume RBG_A ready, get B ready for next loop
-			tasks["B"] = @async host_RGB_B = Array(device_RGB_B)
-			runme(i)
+			tasks["B"] = @async begin runme(i); copyto!(host_RGB_B, device_RGB_B) end#host_RGB_B = Array(device_RGB_B)
+			
 			wait(tasks["A"])	
 			hm[3] = host_RGB_A
 		else
-			tasks["A"] = @async host_RGB_A = Array(device_RGB_A)
-			runme(i)
+			tasks["A"] = @async begin runme(i); copyto!(host_RGB_A, device_RGB_A) end#host_RGB_A = Array(device_RGB_A)
+			
 			wait(tasks["B"])	
 			hm[3] = host_RGB_B
 		end
