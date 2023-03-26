@@ -461,17 +461,19 @@ function continuum_shade!(imager::ExperimentalImager2;
     by a factor of (δx * δy) compared to StableImager
     """
     RGB3 .= 0.0f0
-    tri_view = @view tris[tracer.hit_idx]
+    
     
     δx = tracer.δ |> a -> reshape(a, (length(a)))
     δy = tracer.δ |> a -> reshape(a, (1, length(a)))
+    tri_view = @view tris[tracer.hit_idx]
     rays .= final_evolution.(rays, tracer.hit_idx, tri_view)
+    
     R = length(rays)
     # reshape so expansions are first dims, and put in a common block for better IO patterns
     upres_rgb = copy(RGB)
     upres_rgb = reshape(upres_rgb, (length(δx), length(δy), R))
-    rays_per_block = 2
-
+    rays_per_block = min(1, 32 ÷ (length(δx) * length(δy)))
+    
     tuple_ret = Tuple(Tuple(retina_factor[1, i, :]) for i in 1:3)
 
     args = upres_rgb, rays, tri_view, δx, δy, spectrum, tex, retina_factor, intensity

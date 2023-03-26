@@ -331,7 +331,7 @@ function trace!(
             basic_params...,
             array_kwargs...,
         )
-        continuum_light_map!(; tracer = tracer, basic_params..., array_kwargs...)
+        continuum_light_map2!(; tracer = tracer, basic_params..., array_kwargs...)
 
         # this is slowish for real time loop
         tex_task = @async tex = CuTexture(CuTextureArray(tex); interpolation=CUDA.LinearInterpolation())

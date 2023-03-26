@@ -10,6 +10,8 @@ struct RectLight <: AbstractLight
     res2::Int
 end
 
+rays_in_light(light :: RectLight) = light.res1 * light.res2
+
 
 # Functions that generate rays: camera + light sources
 
@@ -95,6 +97,17 @@ function rays_from_light(light::RectLight, upscale)
 end
 
 function rays_from_lights(lights::AbstractArray{T}, upscale) where {T<:AbstractLight}
-    ray_chunks = [rays_from_light(light, upscale) for light in lights]
-    return vcat(ray_chunks...)
+    if length(lights) == 1
+        return rays_from_light(lights[1], upscale)
+    end
+    
+    out= CuArray{ADRay}(undef, sum(rays_in_light(L) for L in lights))
+    index_floor = 0
+    for L in lights
+        N = rays_in_light(L)
+        out_view = @view out[index_floor+1:index_floor+N]
+        out_view .= rays_from_light(L, upscale)
+        index_floor += N
+    end
+    return out
 end

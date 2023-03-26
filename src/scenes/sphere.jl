@@ -1,5 +1,5 @@
 # RUN FROM /
-using Revise, LazyArrays, Parameters, GLMakie, CUDA, KernelAbstractions , CUDAKernels, NVTX
+using Revise, LazyArrays, Parameters, CairoMakie, CUDA, KernelAbstractions , CUDAKernels, NVTX
 
 include("../geo.jl")
 include("../skys.jl")
@@ -61,10 +61,10 @@ function main()
 
 	#bounding_volumes, bounding_volumes_members = cluster_fuck(Array(tris), 4)
 
-	bounding_volumes, bounding_volumes_members = bv_partition(tris, 3; verbose=true)
+	bounding_volumes, bounding_volumes_members = bv_partition(tris, 5; verbose=true)
 
-	forward_hitter = DPBVHitter(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights), tris, bounding_volumes, bounding_volumes_members; concurrency=8)
-    backward_hitter = DPBVHitter(CuArray, height * width ÷ (backward_upscale ^ 2), tris, bounding_volumes, bounding_volumes_members; concurrency=8)
+	forward_hitter = DPBVHitter(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights), tris, bounding_volumes, bounding_volumes_members; concurrency=32)
+    backward_hitter = DPBVHitter(CuArray, height * width ÷ (backward_upscale ^ 2), tris, bounding_volumes, bounding_volumes_members; concurrency=32)
     
 	#forward_hitter = ExperimentalHitter3(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights))#, tris, bounding_volumes, bounding_volumes_members)
     #backward_hitter = ExperimentalHitter3(CuArray, height * width ÷ (backward_upscale ^ 2))#, tris, bounding_volumes, bounding_volumes_members)
@@ -72,14 +72,21 @@ function main()
 	#forward_hitter = BoundingVolumeHitter(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights), bounding_volumes, bounding_volumes_members)
 	#backward_hitter = BoundingVolumeHitter(CuArray, height * width ÷ (backward_upscale ^ 2), bounding_volumes, bounding_volumes_members)
  
-
+	host_RGB_A, host_RGB_B = Array{RGBf}(undef, height, width), Array{RGBf}(undef, height, width)
+	device_RGB_A, device_RGB_B = CuArray(host_RGB_A), CuArray(host_RGB_B)
+	
 	runme(i) = begin
 		trace_kwargs = Dict{Symbol, Any}()
 		@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max, forward_hitter, backward_hitter
 		trace_kwargs = merge(basic_params, trace_kwargs)
 		RGB = trace!(StableTracer, ExperimentalImager2; intensity=1.0f0, force_rand=1f0, trace_kwargs...)
-
-		return reshape(RGB, (height, width))
+		#return reshape(RGB, (height, width))
+		#copyto!(host_RGB, RGB)
+		if i % 2 == 0
+			device_RGB_A = (reshape(RGB, (height, width)))
+		else
+			device_RGB_B = (reshape(RGB, (height, width)))
+		end
 	end
 
 
@@ -93,18 +100,30 @@ function main()
 	# and without record, one needs to insert a yield to yield to the render task
 
 	runme(1)
-	runme(1)
+	runme(2)
 	hm[3] = runme(1)
 	display(fig)
 
+	tasks = Dict()
+
+	t0 = @async 1
+	tasks["B"] = t0
 
 	@time for i in 1:40
 	#    events(hm).mouseposition |> println
-		tv = @view host_tris[2:first_diffuse-1]
-		oscillate(tv) = translate(tv, ℜ³(cos(i / 20) / 50, 0, sin(i / 20) / 50))
-		tv .= oscillate.(tv)
 		
-		hm[3] = runme(1) # update data
+		if i % 2 == 0
+			# assume RBG_A ready, get B ready for next loop
+			tasks["B"] = @async host_RGB_B = Array(device_RGB_B)
+			runme(i)
+			wait(tasks["A"])	
+			hm[3] = host_RGB_A
+		else
+			tasks["A"] = @async host_RGB_A = Array(device_RGB_A)
+			runme(i)
+			wait(tasks["B"])	
+			hm[3] = host_RGB_B
+		end
 		yield()
 	end
 end
