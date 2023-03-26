@@ -21,8 +21,8 @@ function main()
 		iterations_per_frame=1
 		# Geometry
 		frame = 1
-		lobe1 = mesh_to_FTri(load("C:/Users/ellis/Documents/Github/mcabbot/SHART/objs/lobe1_1.obj"))
-		lobe2 = mesh_to_FTri(load("C:/Users/ellis/Documents/Github/mcabbot/SHART/objs/lobe2_1.obj"))
+		lobe1 = mesh_to_FTri(load("C:/Users/ellis/Documents/Github/mcabbot/SHART/objs/lobe1_2.obj"))
+		lobe2 = mesh_to_FTri(load("C:/Users/ellis/Documents/Github/mcabbot/SHART/objs/lobe2_2.obj"))
 		R = rotation_matrix(ℜ³(1,0,0), 2 * pi * frame / 180) * rotation_matrix(axis, 2 * pi * 44 / 180) * rotation_matrix(ℜ³(0, 0, 1), pi / 4) * rotation_matrix(ℜ³(1, 0, 0), pi / 2) * rotation_matrix(ℜ³(0, 0, 1), pi / 4)
 		lobe1 = map(t -> translate(t, ℜ³(0, 0, -0.25) ), lobe1)
 		lobe1 = map(t -> rotate(t, R), lobe1)
@@ -32,7 +32,7 @@ function main()
 		first_diffuse = 1 + length(lobe1) + 1
 		tris = foldl(vcat, meshes)
 
-		BV_BISCETION_COUNT = 3
+		BV_BISCETION_COUNT = 6
 
 		bounding_volumes, bounding_volumes_members = bv_partition(tris, BV_BISCETION_COUNT; verbose=true)
 
@@ -63,8 +63,8 @@ function main()
 		#forward_hitter = ExperimentalHitter3(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights))#, tris, bounding_volumes, bounding_volumes_members)
 		#backward_hitter = ExperimentalHitter3(CuArray, height * width ÷ (backward_upscale ^ 2))#, tris, bounding_volumes, bounding_volumes_members)
  		
-		forward_hitter = DPBVHitter(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights), tris, bounding_volumes, bounding_volumes_members; concurrency=8)
-		backward_hitter = DPBVHitter(CuArray, height * width ÷ (backward_upscale ^ 2), tris, bounding_volumes, bounding_volumes_members; concurrency=8)
+		forward_hitter = DPBVHitter(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights), tris, bounding_volumes, bounding_volumes_members; concurrency=32)
+		backward_hitter = DPBVHitter(CuArray, height * width ÷ (backward_upscale ^ 2), tris, bounding_volumes, bounding_volumes_members; concurrency=32)
  		
 		#forward_hitter = BoundingVolumeHitter(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights), bounding_volumes, bounding_volumes_members)
 		#backward_hitter = BoundingVolumeHitter(CuArray, height * width ÷ (backward_upscale ^ 2), bounding_volumes, bounding_volumes_members)
@@ -74,7 +74,7 @@ function main()
 			trace_kwargs = Dict{Symbol, Any}()
 			@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max, forward_hitter, backward_hitter
 			trace_kwargs = merge(basic_params, trace_kwargs)
-			RGB = trace!(StableTracer, ExperimentalImager2; intensity=1.0f0, trace_kwargs...)
+			RGB = trace!(ExperimentalTracer, ExperimentalImager2; intensity=1.0f0, trace_kwargs...)
 
 			return reshape(RGB, (height, width))
 		end
@@ -93,22 +93,31 @@ function main()
 		runme(1)
 		hm[3] = runme(1)
 		display(fig)
-
+		tri_copy = copy(tris)
 		bvs2, bvms2 = copy(bounding_volumes), copy(bounding_volumes_members)
 		@time for i in 1:40
 
-			
-
 		#    events(hm).mouseposition |> println
-			recalc_task = Threads.@spawn begin
-				tv = @view tris[2:end]
-				oscillate(tv) = translate(tv, ℜ³(cos(i / 20) / 500, 0, sin(i / 20) / 500))
-				tv .= oscillate.(tv)
-				bvs2, bvms2 = bv_partition(tris, BV_BISCETION_COUNT)
+			 recalc_task = Threads.@spawn begin
+				tri_copy = copy(tris) 
+				tv = @view tri_copy[2:end]
+				#oscillate(tv) = translate(tv, ℜ³(cos(i / 20) / 500, 0, sin(i / 20) / 500))
+				#tv .= oscillate.(tv)
+				
+				centroid = centroidish(tv)
+					
+				R = rotation_matrix(ℜ³(1,0,0), 2 * pi * 1 / 400)
+				tv .= map(t -> translate(t, -centroid), tv)
+				tv .= map(t -> rotate(t, R), tv)
+				tv .= map(t -> translate(t, centroid), tv)
+
+				bvs2, bvms2 = bv_partition(tri_copy, BV_BISCETION_COUNT)
+			
 			end 
 			
 			hm[3] = runme(1) # update data
 			wait(recalc_task)
+			tris .= tri_copy
 			repack!(forward_hitter, bvs2, bvms2)
 			repack!(backward_hitter, bvs2, bvms2)
 			yield()

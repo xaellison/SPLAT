@@ -151,7 +151,6 @@ function continuum_light_map2!(;
     kwargs...,
 )
     tri_view = @view tris[tracer.hit_idx]
-    @assert length(rays) % 256 == 0
     # TODO: remove alloc
     rays .= final_evolution.(rays, tracer.hit_idx, tri_view)
     @cuda blocks = length(rays) threads = prod((length(tracer.δ), length(tracer.δ), length(spectrum))) atomic_spectrum_kernel2(
@@ -472,7 +471,7 @@ function continuum_shade!(imager::ExperimentalImager2;
     # reshape so expansions are first dims, and put in a common block for better IO patterns
     upres_rgb = copy(RGB)
     upres_rgb = reshape(upres_rgb, (length(δx), length(δy), R))
-    rays_per_block = min(1, 32 ÷ (length(δx) * length(δy)))
+    rays_per_block = min(1, max(1, 32 ÷ (length(δx) * length(δy))))
     
     tuple_ret = Tuple(Tuple(retina_factor[1, i, :]) for i in 1:3)
 
@@ -483,7 +482,7 @@ function continuum_shade!(imager::ExperimentalImager2;
     #upres_rgb = s.(reshape(rays, (1, 1, R)), reshape(tri_view, (1,1, R)), first_diffuse, intensity, δx, δy)
     upres_rgb = permutedims(upres_rgb, (3, 1, 2))
     # next 3 lines expand into final image
-    upres_rgb = reshape(upres_rgb, width ÷ length(δx), height ÷ length(δy), length(δx), length(δy))
+    upres_rgb = reshape(upres_rgb, height ÷ length(δy), width ÷ length(δx), length(δx), length(δy))
     upres_rgb = permutedims(upres_rgb, (3, 1, 4, 2))
     upres_rgb = reshape(upres_rgb, size(RGB))
     RGB .= upres_rgb
