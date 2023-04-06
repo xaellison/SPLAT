@@ -24,7 +24,7 @@ function main()
                 c_tris = CuArray(tris)
                 n_tris = tuple.(Int32(1):Int32(length(tris)), c_tris) |> m -> reshape(m, 1, length(m))
 
-                hitter = ExperimentalHitter3(CuArray, rays)
+                hitter = ExperimentalHitter6(CuArray, rays)
                 tracer = StableTracer(CuArray, rays, 1)
             end
             out[(R, N)] = median(B.times)
@@ -33,7 +33,7 @@ function main()
 
     rows = [(k..., out[k]) for k in keys(out)]
     sort!(rows)
-    open("experimental_3_3060_mutable.csv", "w") do f
+    open("exp_6.csv", "w") do f
                     write(f, "rays, tris, time\n")
                   for row in rows
                       R, N, t = row

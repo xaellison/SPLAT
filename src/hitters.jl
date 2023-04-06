@@ -155,13 +155,80 @@ function next_hit!(tracer, hitter::ExperimentalHitter2, rays, n_tris)
     # is to keep grid size within maximum but also tris along thread_x (warp)
     blocks = (cld(length(rays), threads), cld(length(n_tris), threads))
     kernel(my_args...; blocks = blocks, threads = threads, shmem=get_shmem(threads))
-    dest_view = @view tracer.hit_idx[1:length(rays)]
-    dest_view .= retreive_arg.(src_view)
+    #dest_view = @view tracer.hit_idx[1:length(rays)]
+    #dest_view .= retreive_arg.(src_view)
     end
     return
 end
 
 
+#6
+
+
+function next_hit_kernel6(rays, n_tris :: AbstractArray{X}, dest :: AbstractArray{UInt64}, default ) where {X}
+    ray_idx = threadIdx().y + (blockIdx().x - 1) * blockDim().y
+    tri_idx = threadIdx().x + (blockIdx().y - 1) * blockDim().x
+    r = rays[ray_idx]
+    arg_min = default
+    min_val = Inf32
+    i = zero(Int32)
+    T = Tri(zero(ℜ³), zero(ℜ³), zero(ℜ³), zero(ℜ³))
+    if tri_idx <= length(n_tris)
+        i, T = n_tris[tri_idx]#[1]
+    #    T = Tri(n_tris[tri_idx][2][1], n_tris[tri_idx][2][2], n_tris[tri_idx][2][3], n_tris[tri_idx][2][4])
+        #T = Tri(FT[1], FT[2], FT[3], FT[4])
+    end
+    t = distance_to_plane(r, T)
+    p = r.pos + r.dir * t
+    if in_triangle(p, T) && min_val > t > 0 && r.ignore_tri != i
+        arg_min = i
+        min_val = t
+    end
+    for shuffle_step in 0:4
+        sync_warp()
+        neighbor_arg_min = shfl_down_sync(0xFFFFFFFF, arg_min, 1<<shuffle_step)
+        neighbor_min_val = shfl_down_sync(0xFFFFFFFF, min_val, 1<<shuffle_step)
+        if neighbor_min_val < min_val
+            arg_min = neighbor_arg_min
+            min_val = neighbor_min_val
+        end
+    end
+    if laneid() == 1
+        operand = monotonic_reinterpret(UInt64, (min_val, UInt32(arg_min)))
+        CUDA.@atomic dest[ray_idx] = min(dest[ray_idx], operand)
+    end
+    return nothing
+end
+
+
+
+function next_hit!(tracer, hitter::ExperimentalHitter6, rays, n_tris)
+    begin
+    # fuzzy req: length(rays) should = 0 mod 128/256/512
+    my_args = rays, n_tris, hitter.tmp, Int32(1)
+    kernel = @cuda launch = false next_hit_kernel6(my_args...)
+    src_view = @view hitter.tmp[1:length(rays)]
+    src_view .= typemax(UInt64)
+    # TODO: this is running <= 50% occupancy. Need to put a cap on shmem smaller than block
+    get_shmem(threads) = prod(threads) * sizeof(FastRay)
+    config = launch_configuration(kernel.fun, shmem = threads -> get_shmem(threads))
+    
+    threads = (32, config.threads ÷ 32)
+    #@assert length(rays) % threads == 0
+    # the totally confusing flip of xy for ray/tri at the block/grid level
+    # is to keep grid size within maximum but also tris along thread_x (warp)
+    blocks = (cld(length(rays), threads[2]), cld(length(n_tris), threads[1]))
+    kernel(my_args...; blocks = blocks, threads = threads, shmem=get_shmem(threads))
+    dest_view = @view tracer.hit_idx[1:length(rays)]
+    dest_view .= reinterpret.(Int32, retreive_arg.(src_view))
+    end
+    return
+end
+
+
+
+
+##
 ## ExperimentalHitter3
 # Higher theoretical occupancy than EH2, performs slightly worse
 
@@ -429,6 +496,12 @@ function queue_rays_kernel2(rays, spheres, queues, queue_counter)
 
     distance = get_hit((Int32(1), bv), r)[1]
     condition = ! isinf(distance) && distance > 0
+
+    # micro-opt: if no rays hit the bv, don't perform warp-sum
+    if ! CUDA.vote_any_sync(0xFFFFFFFF, condition)
+        return
+    end
+
     thread_cumsum = 1 & condition
 
     for iter in 0:4
@@ -532,7 +605,7 @@ function dp_launcher_kernel(bv_floor, child_threads, child_shmem, bv_tri_count, 
     tri_index_view = @view bv_tris[bv_index, 1:tri_counts]
     blocks = (cld(padded_rays_in_queue, threads), cld(tri_counts, threads))
     s = CuDeviceStream()
-    @cuda dynamic=true stream=s  threads=threads shmem=child_shmem blocks=blocks next_hit_kernel5(rays, queue_view, n_tris, tri_index_view, tmp, default)
+    @cuda dynamic=true stream=s threads=threads shmem=child_shmem blocks=blocks next_hit_kernel5(rays, queue_view, n_tris, tri_index_view, tmp, default)
    
     CUDA.device_synchronize()
     return
@@ -559,7 +632,7 @@ function next_hit!(tracer, hitter::DPBVHitter{BV}, rays, n_tris) where BV
         end
         let 
             get_shmem(threads) = threads * (sizeof(Int) + sizeof(FastRay))
-            child_threads = 256
+            child_threads = 128
             child_shmem = get_shmem(child_threads)
             @cuda threads=concurrency dp_launcher_kernel(bv_floor, child_threads, child_shmem, hitter.bv_tri_count, hitter.bv_tris, hitter.ray_queue_atomic_counters, rays, hitter.ray_queues, n_tris, hitter.tmp, Int32(1))
             

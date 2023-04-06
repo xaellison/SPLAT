@@ -1,5 +1,5 @@
 # RUN FROM /
-using Revise, LazyArrays, Parameters, GLMakie, CUDA, KernelAbstractions , CUDAKernels, NVTX
+using Revise, LazyArrays, Parameters, GLMakie, CUDA, KernelAbstractions, CUDAKernels, NVTX
 
 include("../geo.jl")
 include("../skys.jl")
@@ -8,8 +8,8 @@ include("../procedural_assets.jl")
 
 function main()
 	# Tracing params
-    width = 1024
-    height = 1024
+    width = 1280
+    height = 720
     dλ = 25.0f0
     λ_min = 400.0f0
     λ_max = 700.0f0
@@ -63,11 +63,11 @@ function main()
 
 	bounding_volumes, bounding_volumes_members = bv_partition(tris, 5; verbose=true)
 
-	forward_hitter = DPBVHitter(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights), tris, bounding_volumes, bounding_volumes_members; concurrency=32)
-    backward_hitter = DPBVHitter(CuArray, height * width ÷ (backward_upscale ^ 2), tris, bounding_volumes, bounding_volumes_members; concurrency=32)
+	#forward_hitter = DPBVHitter(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights), tris, bounding_volumes, bounding_volumes_members; concurrency=32)
+    #backward_hitter = DPBVHitter(CuArray, height * width ÷ (backward_upscale ^ 2), tris, bounding_volumes, bounding_volumes_members; concurrency=32)
     
-	#forward_hitter = ExperimentalHitter3(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights))#, tris, bounding_volumes, bounding_volumes_members)
-    #backward_hitter = ExperimentalHitter3(CuArray, height * width ÷ (backward_upscale ^ 2))#, tris, bounding_volumes, bounding_volumes_members)
+	forward_hitter = ExperimentalHitter6(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights))#, tris, bounding_volumes, bounding_volumes_members)
+    backward_hitter = ExperimentalHitter6(CuArray, height * width ÷ (backward_upscale ^ 2))#, tris, bounding_volumes, bounding_volumes_members)
    
 	#forward_hitter = BoundingVolumeHitter(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights), bounding_volumes, bounding_volumes_members)
 	#backward_hitter = BoundingVolumeHitter(CuArray, height * width ÷ (backward_upscale ^ 2), bounding_volumes, bounding_volumes_members)
@@ -118,15 +118,18 @@ function main()
 			# assume RBG_A ready, get B ready for next loop
 			tasks["B"] = @async begin runme(i); copyto!(host_RGB_B, device_RGB_B) end#host_RGB_B = Array(device_RGB_B)
 			
-			wait(tasks["A"])	
+			wait(tasks["A"])
+			#Threads.@spawn save("out/$i.png", host_RGB_A)	
 			hm[3] = host_RGB_A
 		else
 			tasks["A"] = @async begin runme(i); copyto!(host_RGB_A, device_RGB_A) end#host_RGB_A = Array(device_RGB_A)
 			
-			wait(tasks["B"])	
+			wait(tasks["B"])
+			#Threads.@spawn save("out/$i.png", host_RGB_B)
 			hm[3] = host_RGB_B
 		end
 		yield()
+		#@async save("out/$i.png", fig )
 	end
 end
 CUDA.@profile main()

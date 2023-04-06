@@ -38,7 +38,7 @@ function main()
 
 		#bounding_volumes, bounding_volumes_members = cluster_fuck(tris, 64)
 
-		@time bounding_volumes, bounding_volumes_members = bv_partition(tris, 6; verbose=true)
+		@time bounding_volumes, bounding_volumes_members = bv_partition(tris, 9; verbose=true)
 		
 		tex_f() = checkered_tex(32, 16, length(λ_min:dλ:λ_max)) .*0#.* 12#CUDA.zeros(Float32, width ÷2, width÷2, length(Λ))
 
@@ -64,11 +64,10 @@ function main()
 			RectLight(ℜ³(-50, 50, 0), ℜ³(1, -1, 0), ℜ³(14, 14, 0), ℜ³(0, 0, 20), light_size, light_size),
 			RectLight(ℜ³(50, 50, 0), ℜ³(-1, -1, 0), ℜ³(14, -14, 0), ℜ³(0, 0, 20), light_size, light_size),
 		]
-#		forward_hitter = DPBVHitter(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights), tris, bounding_volumes, bounding_volumes_members)
-#		backward_hitter = DPBVHitter(CuArray, height * width ÷ (backward_upscale ^ 2), tris, bounding_volumes, bounding_volumes_members)
- 
-		forward_hitter = BoundingVolumeHitter(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights), bounding_volumes, bounding_volumes_members; concurrency=4)
-		backward_hitter = BoundingVolumeHitter(CuArray, height * width ÷ (backward_upscale ^ 2), bounding_volumes, bounding_volumes_members; concurrency=4)
+		forward_hitter = DPBVHitter(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights), tris, bounding_volumes, bounding_volumes_members; concurrency=128)
+		backward_hitter = DPBVHitter(CuArray, height * width ÷ (backward_upscale ^ 2), tris, bounding_volumes, bounding_volumes_members; concurrency=128)
+		#forward_hitter = BoundingVolumeHitter(CuArray, light_size ^ 2 ÷ (forward_upscale ^ 2) * length(lights), bounding_volumes, bounding_volumes_members; concurrency=4)
+		#backward_hitter = BoundingVolumeHitter(CuArray, height * width ÷ (backward_upscale ^ 2), bounding_volumes, bounding_volumes_members; concurrency=4)
 
 		trace_kwargs = Dict{Symbol, Any}()
 		
@@ -76,7 +75,7 @@ function main()
 		trace_kwargs = merge(basic_params, trace_kwargs)
 		@info "start..."
 		
-		CUDA.@time RGB = trace!(ExperimentalTracer, ExperimentalImager2; intensity=1f0, iterations_per_frame=4, force_rand=1.0f0, trace_kwargs...)
+		CUDA.@time RGB = trace!(ExperimentalTracer, ExperimentalImager2; intensity=1f0, iterations_per_frame=1, force_rand=1.0f0, trace_kwargs...)
 
 		save("out/splash/$(lpad(frame, 3, "0")).png", permutedims(reshape(Array(RGB), (height, width)), (2,1)))
 	end

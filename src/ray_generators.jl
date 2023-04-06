@@ -29,7 +29,7 @@ function camera_ray(camera, height, width, x, y, λ, dv)
                _z * camera.dir +
                dv * 0.025f0 / max(height, width)
    end
-    idx = (y - 1) * width + x
+    idx = (y - 1) * height + x
     return ADRay(
         camera.pos,
         zero(ℜ³),
@@ -101,10 +101,10 @@ function rays_from_lights(lights::AbstractArray{T}, upscale) where {T<:AbstractL
         return rays_from_light(lights[1], upscale)
     end
     
-    out= CuArray{ADRay}(undef, sum(rays_in_light(L) for L in lights))
+    out= CuArray{ADRay}(undef, sum(rays_in_light(L)  ÷ (upscale ^ 2) for L in lights))
     index_floor = 0
     for L in lights
-        N = rays_in_light(L)
+        N = rays_in_light(L) ÷ (upscale ^ 2)
         out_view = @view out[index_floor+1:index_floor+N]
         out_view .= rays_from_light(L, upscale)
         index_floor += N

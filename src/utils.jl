@@ -59,6 +59,13 @@ struct BoundingVolumeHitter{BV} <: AbstractHitter
     hitter :: ExperimentalHitter4
 end
 
+struct ExperimentalHitter6 <: AbstractHitter
+    tmp::AbstractArray{UInt64}
+end
+
+ExperimentalHitter6(A, rays) = ExperimentalHitter6(A{UInt64}(undef, size(rays)))
+ExperimentalHitter6(A, ray_length::Int) = ExperimentalHitter6(A{UInt64}(undef, ray_length))
+
 BoundingVolumeHitter(A, ray_length::Int, bvs :: AbstractArray{BV}, memberships; concurrency::Int=4) where BV = begin
     BoundingVolumeHitter{BV}(bvs,
                          Dict(k => A(v) for (k, v) in memberships),
