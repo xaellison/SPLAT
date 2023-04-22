@@ -122,3 +122,27 @@ end
 
 #@time load_and_cluster_fuck("objs\\artemis_smaller.obj", 3);
 
+
+function pack_bv_tris(A, tris, bvs, memberships; max_overcount_factor=4.0) :: Tuple{AbstractArray{Int}, AbstractArray{Int}}
+    # for 100k tris, 256 bvs, `out` will take up 195 MB
+    out = A{Int}(undef, length(bvs), Int(ceil(length(tris) / length(bvs) * max_overcount_factor)))
+    host_counts = zeros(Int, length(bvs))
+    for (k, v) in memberships
+        out_view = @view out[k, 1:length(v)] 
+        out_view .= A(sort(v))
+        host_counts[k] = length(v)
+    end 
+    return A(host_counts), out
+end
+
+function repack!(hitter, bvs, memberships)
+    hitter.bvs .= bvs
+    host_counts = zeros(Int, length(bvs))
+    for (k, v) in memberships
+        out_view = @view hitter.bv_tris[k, 1:length(v)]
+        copy!(out_view, sort(v))
+ #       out_view .= CuArray(sort(v))
+        host_counts[k] = length(v)
+    end
+    hitter.bv_tri_count .= CuArray(host_counts)
+end

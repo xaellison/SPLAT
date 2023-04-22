@@ -1,5 +1,5 @@
 include("material.jl") # disable for nvvp
-include("utils.jl")
+include("alg_types.jl")
 include("ray_generators.jl")
 include("ray_imagers.jl") # disable for nvvp
 include("rgb_spectrum.jl") # disable for nvvp
@@ -309,17 +309,21 @@ function trace!(
     
     for frame_iter in 1:iterations_per_frame
         tex = tex_f()
+        n_tris = tuple.(Int32(1):Int32(length(tris)), map(tri_from_ftri, tris)) |> m -> reshape(m, 1, length(m))
+        
+        spectrum, retina_factor = _spectrum_datastructs(CuArray, λ_min:dλ:λ_max)
         # initialize rays for forward tracing
+       tex_task = @async begin 
+            let
         rays = rays_from_lights(lights, forward_upscale)
         
         
         tracer = T(CuArray, rays, forward_upscale)
 
-        spectrum, retina_factor = _spectrum_datastructs(CuArray, λ_min:dλ:λ_max)
 
         basic_params = Dict{Symbol,Any}()
         @pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, intensity, force_rand
-        n_tris = tuple.(Int32(1):Int32(length(tris)), map(tri_from_ftri, tris)) |> m -> reshape(m, 1, length(m))
+       
 
         array_kwargs = Dict{Symbol,Any}()
         @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor
@@ -332,46 +336,49 @@ function trace!(
             array_kwargs...,
         )
         continuum_light_map2!(; tracer = tracer, basic_params..., array_kwargs...)
-
+        end
+        tex = CuTexture(CuTextureArray(tex); interpolation=CUDA.LinearInterpolation())
+    end
         # this is slowish for real time loop
-        tex_task = @async tex = CuTexture(CuTextureArray(tex); interpolation=CUDA.LinearInterpolation())
+ #       tex_task = @async 
+        let
+            # reverse trace image
+            RGB3 = CuArray{Float32}(undef, width * height, 3)
+            RGB3 .= 0
+            RGB = CuArray{RGBf}(undef, width * height)
 
-        # reverse trace image
-        RGB3 = CuArray{Float32}(undef, width * height, 3)
-        RGB3 .= 0
-        RGB = CuArray{RGBf}(undef, width * height)
+            ray_generator(x, y, λ, dv) = camera_ray(cam, height ÷ backward_upscale, width ÷ backward_upscale, x, y, λ, dv)
+            rays = wrap_ray_gen(ray_generator, height ÷ backward_upscale, width ÷ backward_upscale)
 
-        ray_generator(x, y, λ, dv) = camera_ray(cam, height ÷ backward_upscale, width ÷ backward_upscale, x, y, λ, dv)
-        rays = wrap_ray_gen(ray_generator, height ÷ backward_upscale, width ÷ backward_upscale)
+            tracer = T(CuArray, rays, backward_upscale)
 
-        tracer = T(CuArray, rays, backward_upscale)
-
-        basic_params = Dict{Symbol,Any}()
-        @pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, intensity, force_rand
-        
-        array_kwargs = Dict{Symbol,Any}()
-
-        @pack! array_kwargs = tris, n_tris, rays, spectrum, retina_factor, RGB3, RGB, rays
-        array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
-
-        NVTX.@range "evolver" begin CUDA.@sync begin run_evolution!(
-            backward_hitter,
-            tracer;
-            reorder=true,
-            basic_params...,
-            array_kwargs...,
-        ) end end
-
-        wait(tex_task)
+            basic_params = Dict{Symbol,Any}()
+            @pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, intensity, force_rand
             
-        NVTX.@range "shady" begin CUDA.@sync begin continuum_shade!(I(); tracer = tracer, tex=tex, basic_params..., array_kwargs...) end end
-        #@async unsafe_destroy!(tex)
-        @unpack RGB = array_kwargs
-    	if frame_iter == 1
-    		out = RGB
-    	else
-    		out .= out .* (frame_iter - 1) / frame_iter + RGB ./ frame_iter
-    	end
+            array_kwargs = Dict{Symbol,Any}()
+
+            @pack! array_kwargs = tris, n_tris, rays, spectrum, retina_factor, RGB3, RGB, rays
+            array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
+
+            NVTX.@range "evolver" begin CUDA.@sync begin run_evolution!(
+                backward_hitter,
+                tracer;
+                reorder=true,
+                basic_params...,
+                array_kwargs...,
+            ) end end
+
+            wait(tex_task)
+                
+            NVTX.@range "shady" begin CUDA.@sync begin continuum_shade!(I(); tracer = tracer, tex=tex, basic_params..., array_kwargs...) end end
+            #@async unsafe_destroy!(tex)
+            @unpack RGB = array_kwargs
+            if frame_iter == 1
+                out = RGB
+            else
+                out .= out .* (frame_iter - 1) / frame_iter + RGB ./ frame_iter
+            end
+        end
     end
     return out
 end

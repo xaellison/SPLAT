@@ -1,5 +1,5 @@
 # RUN FROM /
-using Revise, LazyArrays, Parameters, GLMakie, CUDA, KernelAbstractions, CUDAKernels, NVTX
+using Revise, LazyArrays, Parameters, GLMakie, CUDA,  NVTX
 
 include("../geo.jl")
 include("../skys.jl")
@@ -63,11 +63,11 @@ function main()
 
 	bounding_volumes, bounding_volumes_members = bv_partition(tris, 5; verbose=true)
 
-	#forward_hitter = DPBVHitter(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights), tris, bounding_volumes, bounding_volumes_members; concurrency=32)
-    #backward_hitter = DPBVHitter(CuArray, height * width ÷ (backward_upscale ^ 2), tris, bounding_volumes, bounding_volumes_members; concurrency=32)
+	forward_hitter = DPBVHitter(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights), tris, bounding_volumes, bounding_volumes_members; concurrency=32)
+    backward_hitter = DPBVHitter(CuArray, height * width ÷ (backward_upscale ^ 2), tris, bounding_volumes, bounding_volumes_members; concurrency=32)
     
-	forward_hitter = ExperimentalHitter6(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights))#, tris, bounding_volumes, bounding_volumes_members)
-    backward_hitter = ExperimentalHitter6(CuArray, height * width ÷ (backward_upscale ^ 2))#, tris, bounding_volumes, bounding_volumes_members)
+	#forward_hitter = ExperimentalHitter6(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights))#, tris, bounding_volumes, bounding_volumes_members)
+    #backward_hitter = ExperimentalHitter6(CuArray, height * width ÷ (backward_upscale ^ 2))#, tris, bounding_volumes, bounding_volumes_members)
    
 	#forward_hitter = BoundingVolumeHitter(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights), bounding_volumes, bounding_volumes_members)
 	#backward_hitter = BoundingVolumeHitter(CuArray, height * width ÷ (backward_upscale ^ 2), bounding_volumes, bounding_volumes_members)
@@ -84,11 +84,9 @@ function main()
 		RGB = trace!(StableTracer, ExperimentalImager2; intensity=1.0f0, force_rand=1f0, trace_kwargs...)
 		#return reshape(RGB, (height, width))
 		#copyto!(host_RGB, RGB)
-		if i % 2 == 0
+		
 			device_RGB_A = (reshape(RGB, (height, width)))
-		else
-			device_RGB_B = (reshape(RGB, (height, width)))
-		end
+		
 	end
 
 
@@ -114,20 +112,10 @@ function main()
 	@time for i in 1:40
 	#    events(hm).mouseposition |> println
 		
-		if i % 2 == 1
 			# assume RBG_A ready, get B ready for next loop
-			tasks["B"] = @async begin runme(i); copyto!(host_RGB_B, device_RGB_B) end#host_RGB_B = Array(device_RGB_B)
-			
-			wait(tasks["A"])
-			#Threads.@spawn save("out/$i.png", host_RGB_A)	
+			runme(i); copyto!(host_RGB_A, device_RGB_A)
 			hm[3] = host_RGB_A
-		else
-			tasks["A"] = @async begin runme(i); copyto!(host_RGB_A, device_RGB_A) end#host_RGB_A = Array(device_RGB_A)
-			
-			wait(tasks["B"])
-			#Threads.@spawn save("out/$i.png", host_RGB_B)
-			hm[3] = host_RGB_B
-		end
+		
 		yield()
 		#@async save("out/$i.png", fig )
 	end

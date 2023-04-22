@@ -9,8 +9,8 @@ include("../procedural_assets.jl")
 function main()
 	axis = ℜ³(0, 1, 0) + ℜ³(0.3, 0, 0)
 	out = nothing
-	width = 1024
-	height = 1024
+	width = 2048
+	height = 2048
  	begin	# Tracing params
 	    dλ = 25f0
 	    λ_min = 400.0f0
@@ -21,18 +21,27 @@ function main()
 		iterations_per_frame=1
 		# Geometry
 		frame = 1
-		lobe1 = mesh_to_FTri(load("C:/Users/ellis/Documents/Github/mcabbot/SHART/objs/lobe1_2.obj"))
-		lobe2 = mesh_to_FTri(load("C:/Users/ellis/Documents/Github/mcabbot/SHART/objs/lobe2_2.obj"))
+		lobe1 = mesh_to_FTri(load("objs/lobe1_2.obj"))
+		lobe2 = mesh_to_FTri(load("objs/lobe2_2.obj"))
 		R = rotation_matrix(ℜ³(1,0,0), 2 * pi * frame / 180) * rotation_matrix(axis, 2 * pi * 44 / 180) * rotation_matrix(ℜ³(0, 0, 1), pi / 4) * rotation_matrix(ℜ³(1, 0, 0), pi / 2) * rotation_matrix(ℜ³(0, 0, 1), pi / 4)
 		lobe1 = map(t -> translate(t, ℜ³(0, 0, -0.25) ), lobe1)
 		lobe1 = map(t -> rotate(t, R), lobe1)
-		lobe2 = map(t -> translate(t, ℜ³(0, 0, -0.25) ), lobe2)
+		lobe2 = map(t -> translate(t, ℜ³(0, 0, -0.25) ), lobe2) 
 		lobe2 = map(t -> rotate(t, R), lobe2)
 		meshes = [[zero(FTri)], lobe1, lobe2]
 		first_diffuse = 1 + length(lobe1) + 1
 		tris = foldl(vcat, meshes)
 
-		BV_BISCETION_COUNT = 6
+		tv = @view tris[2:end]
+		centroid = centroidish(tv)
+					
+		R = rotation_matrix(ℜ³(0,0,1),  pi * 0.16)
+		tv .= map(t -> translate(t, -centroid), tv)
+		tv .= map(t -> rotate(t, R), tv)
+		tv .= map(t -> translate(t, centroid), tv)
+
+
+		BV_BISCETION_COUNT = 7
 
 		bounding_volumes, bounding_volumes_members = bv_partition(tris, BV_BISCETION_COUNT; verbose=true)
 
@@ -74,7 +83,7 @@ function main()
 			trace_kwargs = Dict{Symbol, Any}()
 			@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max, forward_hitter, backward_hitter
 			trace_kwargs = merge(basic_params, trace_kwargs)
-			RGB = trace!(ExperimentalTracer, ExperimentalImager2; intensity=1.0f0, trace_kwargs...)
+			RGB = trace!(ExperimentalTracer, ExperimentalImager2; intensity=3.0f0, trace_kwargs...)
 
 			return reshape(RGB, (height, width))
 		end
@@ -95,7 +104,7 @@ function main()
 		display(fig)
 		tri_copy = copy(tris)
 		bvs2, bvms2 = copy(bounding_volumes), copy(bounding_volumes_members)
-		@time for i in 1:40
+		@time for i in 1:400
 
 		#    events(hm).mouseposition |> println
 			 recalc_task = Threads.@spawn begin
@@ -106,7 +115,7 @@ function main()
 				
 				centroid = centroidish(tv)
 					
-				R = rotation_matrix(ℜ³(1,0,0), 2 * pi * 1 / 400)
+				R = rotation_matrix(ℜ³(0, 1, 0), 2 * pi * 1 / 400)
 				tv .= map(t -> translate(t, -centroid), tv)
 				tv .= map(t -> rotate(t, R), tv)
 				tv .= map(t -> translate(t, centroid), tv)

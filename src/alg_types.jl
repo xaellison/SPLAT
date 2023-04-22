@@ -1,18 +1,9 @@
-function _spectrum_datastructs(A, λ_range)
-    spectrum = collect(λ_range) |> a -> reshape(a, 1, 1, length(a))
-    retina_factor = Array{Float32}(undef, 1, 3, length(spectrum))
-    map!(retina_red, begin
-        @view retina_factor[1, 1, :]
-    end, spectrum)
-    map!(retina_green, begin
-        @view retina_factor[1, 2, :]
-    end, spectrum)
-    map!(retina_blue, begin
-        @view retina_factor[1, 3, :]
-    end, spectrum)
-    retina_factor = A(retina_factor)
-    return spectrum, retina_factor
-end
+"""
+Structs and their constructors for modular algorithm components of type
+    1. Hitter (ray / geometry intersector)
+    2. Imagers (turn rays into either light map or output image)
+    3. Tracer (organize pipeline)
+"""
 
 abstract type AbstractHitter end
 
@@ -85,30 +76,6 @@ struct DPBVHitter{BV} <: AbstractHitter
     ray_queues :: AbstractArray{Int}
     queue_swap :: AbstractArray{Int}
     tmp::AbstractArray{UInt64}
-end
-
-function pack_bv_tris(A, tris, bvs, memberships; max_overcount_factor=4.0) :: Tuple{AbstractArray{Int}, AbstractArray{Int}}
-    # for 100k tris, 256 bvs, `out` will take up 195 MB
-    out = A{Int}(undef, length(bvs), Int(ceil(length(tris) / length(bvs) * max_overcount_factor)))
-    host_counts = zeros(Int, length(bvs))
-    for (k, v) in memberships
-        out_view = @view out[k, 1:length(v)] 
-        out_view .= A(sort(v))
-        host_counts[k] = length(v)
-    end 
-    return A(host_counts), out
-end
-
-function repack!(hitter, bvs, memberships)
-    hitter.bvs .= bvs
-    host_counts = zeros(Int, length(bvs))
-    for (k, v) in memberships
-        out_view = @view hitter.bv_tris[k, 1:length(v)]
-        copy!(out_view, sort(v))
- #       out_view .= CuArray(sort(v))
-        host_counts[k] = length(v)
-    end
-    hitter.bv_tri_count .= CuArray(host_counts)
 end
 
 DPBVHitter(A, ray_length::Int, tris, bvs::AbstractArray{BV}, memberships; concurrency::Int=16) where BV = begin

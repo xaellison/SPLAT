@@ -1,4 +1,3 @@
-using Printf
 using Makie
 
 function piecewise(points)
@@ -132,3 +131,19 @@ end
 
 
 export retina_red, retina_green, retina_blue
+
+function _spectrum_datastructs(A, λ_range)
+    spectrum = collect(λ_range) |> a -> reshape(a, 1, 1, length(a))
+    retina_factor = Array{Float32}(undef, 1, 3, length(spectrum))
+    map!(retina_red, begin
+        @view retina_factor[1, 1, :]
+    end, spectrum)
+    map!(retina_green, begin
+        @view retina_factor[1, 2, :]
+    end, spectrum)
+    map!(retina_blue, begin
+        @view retina_factor[1, 3, :]
+    end, spectrum)
+    retina_factor = A(retina_factor)
+    return spectrum, retina_factor
+end
