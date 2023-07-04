@@ -1,2 +1,2 @@
-# SHART
-SHoot, Another Ray Tracer?
+# WWRTRT: World's Worst Real Time Ray Tracer
+
