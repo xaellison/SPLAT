@@ -1,66 +1,123 @@
 # RUN FROM /
-using Revise
+using Revise, LazyArrays, Parameters, GLMakie, CUDA,  NVTX
+
 include("../geo.jl")
 include("../skys.jl")
 include("../tracer.jl")
+include("../procedural_assets.jl")
 
 function main()
+	# Tracing params
+    width = 1280
+    height = 720
+    dλ = 25.0f0
+    λ_min = 400.0f0
+    λ_max = 700.0f0
+    depth = 3
+    ITERS = 1
+	forward_upscale = 4
+	backward_upscale = 4
+	# Geometry
 
-    obj_path = "objs/sphere.obj"
-    tris = mesh_to_STri(load(obj_path))
-	centroid = _centroid(tris)
-	println(centroid)
-	println(model_box(tris))
-    #tris = parse_obj(obj_path)
-    @info "$(length(tris)) triangles"
-    width = 512
-    height = 512#Int(width * 3 / 4)
-    frame_n = 60
+	obj_path = "objs/icos.obj"
+	
+	glass_sphere = mesh_to_FTri(load(obj_path))
+	
+	
+	solid_sphere = mesh_to_FTri(load(obj_path))
+	solid_sphere = map(t -> translate(t, ℜ³(1, 0, -4) ), solid_sphere)
+	
+	glass_sphere2 = mesh_to_FTri(load(obj_path))
+	glass_sphere2 = map(t -> translate(t, ℜ³(0, 2, 0) ), glass_sphere2)
+	
+	solid_sphere2 = mesh_to_FTri(load(obj_path))
+	solid_sphere2 = map(t -> translate(t, ℜ³(1, 2, -4) ), solid_sphere2)
 
-	function moving_camera(frame_i, frame_n)
-		camera_pos = V3((7, 0, 0)) + centroid
-		look_at = zero(V3)
-		up = V3((0.0, 0.0, -1.0))
-		FOV =  45.0 * pi / 180.0
+	meshes = [[zero(FTri)], glass_sphere, glass_sphere2, solid_sphere, solid_sphere2]
+	first_diffuse = 1 + 1 + length(glass_sphere) * 2
+	host_tris = foldl(vcat, meshes)
+	tris = CuArray(host_tris)
+	
 
-		return get_camera(camera_pos, look_at, up, FOV)
+	tex_f() = checkered_tex(32, 16, length(λ_min:dλ:λ_max)) .* 12
+
+	basic_params = Dict{Symbol, Any}()
+	@pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, forward_upscale, backward_upscale
+
+    function my_moving_camera()
+        camera_pos = ℜ³((0, 5, 5))
+        look_at = zero(ℜ³)
+        up = ℜ³((0.0, 0.0, -1.0))
+        FOV = 45.0 * pi / 180.0
+
+        return get_camera(camera_pos, look_at, up, FOV)
+    end
+
+    cam = my_moving_camera()
+
+	lights = [
+		RectLight(ℜ³(0, 0, 8), ℜ³(0, 0, -1), ℜ³(1, 0, 0), ℜ³(0, 1, 0), height, width),
+	]
+
+	#bounding_volumes, bounding_volumes_members = cluster_fuck(Array(tris), 4)
+
+	bounding_volumes, bounding_volumes_members = bv_partition(tris, 5; verbose=true)
+
+	forward_hitter = DPBVHitter(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights), tris, bounding_volumes, bounding_volumes_members; concurrency=32)
+    backward_hitter = DPBVHitter(CuArray, height * width ÷ (backward_upscale ^ 2), tris, bounding_volumes, bounding_volumes_members; concurrency=32)
+    
+	#forward_hitter = ExperimentalHitter6(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights))#, tris, bounding_volumes, bounding_volumes_members)
+    #backward_hitter = ExperimentalHitter6(CuArray, height * width ÷ (backward_upscale ^ 2))#, tris, bounding_volumes, bounding_volumes_members)
+   
+	#forward_hitter = BoundingVolumeHitter(CuArray, height * width ÷ (forward_upscale ^ 2) * length(lights), bounding_volumes, bounding_volumes_members)
+	#backward_hitter = BoundingVolumeHitter(CuArray, height * width ÷ (backward_upscale ^ 2), bounding_volumes, bounding_volumes_members)
+ 
+	host_RGB_A, host_RGB_B = Array{RGBf}(undef, height, width), Array{RGBf}(undef, height, width)
+	device_RGB_A, device_RGB_B = CuArray(host_RGB_A), CuArray(host_RGB_B)
+	Mem.pin(host_RGB_A)
+	Mem.pin(host_RGB_B)
+	
+	runme(i) = begin
+		trace_kwargs = Dict{Symbol, Any}()
+		@pack! trace_kwargs = cam, lights, tex_f, tris, λ_min, dλ, λ_max, forward_hitter, backward_hitter
+		trace_kwargs = merge(basic_params, trace_kwargs)
+		RGB = trace!(StableTracer, ExperimentalImager2; intensity=1.0f0, force_rand=1f0, trace_kwargs...)
+		#return reshape(RGB, (height, width))
+		#copyto!(host_RGB, RGB)
+		
+			device_RGB_A = (reshape(RGB, (height, width)))
+		
 	end
 
-    depth = 3
-    dλ = 30
-    ITERS = 16
 
-    skys = [sky_stripes_down]
-    for i = 1:frame_n
+	matrix = Array{RGBf}(undef, height, width)
+	fig, ax, hm = image(1:height, 1:width, matrix)
 
-		R = rotation_matrix(V3(1, 1, 1), 2 * pi * 0 / frame_n)
-        #translate(t, v) = STri(t[1], t[2] - v, t[3] - v, t[4] - v, t[5:7]...)
-		translate(t, v) = STri(t[1], t[2] - v, t[3] - v, t[4] - v, t[5], t[6], t[7])
-		#translate(t, v) = Tri(t[1], t[2] - v, t[3] - v, t[4] - v)
 
-		tris′ = map(t -> translate(t, -centroid), tris)
+	# we use `record` to show the resulting video in the docs.
+	# If one doesn't need to record a video, a normal loop works as well.
+	# Just don't forget to call `display(fig)` before the loop
+	# and without record, one needs to insert a yield to yield to the render task
 
-        tris′ = map(t -> map(v -> R * v, t), tris′)
+	runme(1)
+	runme(2)
+	hm[3] = runme(1)
+	display(fig)
 
-        images = @time ad_frame_matrix(
-            moving_camera,
-            width,
-            height,
-            tris′,
-            skys,
-            dλ,
-            depth,
-            ITERS,
-            Float32(2 * pi / 20 * i / frame_n),
-            CUDA.rand,
-            CuArray
-        )
-        for s in keys(skys)
-            Makie.save("out/sphere/$(s)/$(lpad(i, 3, "0")).png", images[s])
-        end
+	tasks = Dict()
 
-    end
-    println("~fin")
+	t0 = @async 1
+	tasks["A"] = t0
+
+	@time for i in 1:40
+	#    events(hm).mouseposition |> println
+		
+			# assume RBG_A ready, get B ready for next loop
+			runme(i); copyto!(host_RGB_A, device_RGB_A)
+			hm[3] = host_RGB_A
+		
+		yield()
+		#@async save("out/$i.png", fig )
+	end
 end
-
-main()
+CUDA.@profile main()

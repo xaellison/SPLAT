@@ -1,444 +1,384 @@
-include("material.jl")
-include("rgb_spectrum.jl")
+include("material.jl") # disable for nvvp
+include("alg_types.jl")
+include("ray_generators.jl")
+include("ray_imagers.jl") # disable for nvvp
+include("rgb_spectrum.jl") # disable for nvvp
+include("atomic_argmin.jl")
+include("hitters.jl")
+include("partition.jl") # this brings in geo.jl # disable for nvvp
+include("bv.jl")
 
 using ForwardDiff
 using Makie
-using ProgressMeter
 using Serialization
 
-function get_hit(n_t::Tuple{Int32,T}, r::AbstractRay)::Tuple{Float32,Int32,T} where {T}
-    n, t = n_t
-    d = distance_to_plane(r.pos, r.dir, t[2], t[1])
-    p = r.pos + r.dir * d
-    if in_triangle(p, t[2], t[3], t[4]) && d > 0 && r.ignore_tri != n
-        return (d, n, t)
+import Random.rand!
+
+## get_hit methods - how to intersect rays with geometric elements
+
+function get_hit(i_S::Tuple{Int32,Sphere}, r::AbstractRay; kwargs...)
+    # https://en.wikipedia.org/wiki/Line%E2%80%93sphere_intersection
+    i, S = i_S
+    if S.radius <= 0
+        return (Inf32, one(Int32), S)
+    end
+    t = distance_to_sphere(r.pos, r.dir, S)
+    if isinf(t)
+        return (Inf32, one(Int32), S)
+    end
+    return (t, i, S)
+end
+
+function get_hit(i_S::Tuple{Int32,Sphere}, r::ADRay; kwargs...)
+    i, S = i_S
+    if S.radius <= 0
+        return ((Inf32, Inf32), one(Int32), S)
+    end
+    t0 = distance_to_sphere(r.pos, r.dir, S)
+    t(λ) = distance_to_sphere(r.pos + (λ - r.λ) * r.∂p∂λ, r.dir + (λ - r.λ) * r.∂d∂λ, S)
+    if isinf(t0)
+        return ((Inf32, Inf32), one(Int32), S)
+    end
+    return ((t0, ForwardDiff.derivative(t, r.λ)), i, S)
+end
+
+function get_hit(
+    i_T::Tuple{Int32,AbstractTri},
+    r::AbstractRay;
+    unsafe = false,
+)::Tuple{Float32,Int32,AbstractTri} where {AbstractTri}
+    # unsafe = true will ignore the in triangle test: useful for continuum_shade
+    i, T = i_T
+    t = distance_to_plane(r, T)
+    p = r.pos + r.dir * t
+    if (unsafe || in_triangle(p, T)) && t > 0 && r.ignore_tri != i
+        return (t, i, T) # formerly d, n, t
     else
-        return (Inf32, n, t)
+        return (Inf32, one(Int32), T)
     end
 end
 
-function get_hit(n_t::Tuple{Int32,T}, r::ADRay)::Tuple{Tuple{Float32,Float32},Int32,T} where {T}
-    n, t = n_t
-    d0 = distance_to_plane(r.pos, r.dir, t[2], t[1])
-    d(λ) = distance_to_plane(r.pos + r.pos′ * (λ - r.λ), r.dir + r.dir′ * (λ - r.λ), t[2], t[1])
-    p = r.pos + r.dir * d0
-    if in_triangle(p, t[2], t[3], t[4]) && d0 > 0 && r.ignore_tri != n
-        return ((d0, ForwardDiff.derivative(d, r.λ)), n, t)
+function get_hit(
+    i_T::Tuple{Int32,AbstractTri},
+    r::ADRay;
+    kwargs...,
+)::Tuple{Tuple{Float32,Float32,Float32,Float32},Int32,AbstractTri} where {AbstractTri}
+    i, T = i_T
+    # In the case of i = 1, the degenerate triangle, this will be NaN.
+    # t0 = NaN fails d0 > 0 below, which properly gives us i = 1 back
+    t0 = distance_to_plane(r, T)
+    p0 = r.pos + r.dir * t0
+    if in_triangle(p0, T) && t0 > 0 && r.ignore_tri != i
+        return ((t0,
+                ForwardDiff.derivative(λ -> distance_to_plane(r, T, λ, r.x, r.y), r.λ),
+                ForwardDiff.derivative(x -> distance_to_plane(r, T, r.λ, x, r.y), r.x),
+                ForwardDiff.derivative(y -> distance_to_plane(r, T, r.λ, r.x, y), r.y),),
+                i,
+                T)
     else
-        return ((Inf32, Inf32), n, t)
+        return ((Inf32, Inf32, Inf32, Inf32), one(Int32), T)
     end
 end
 
-## !! Hit computers for AD and non-AD Rays
-
-function next_hit(rays :: AbstractArray{R}, n_tris :: AbstractArray{Tuple{I, T}}) where {R<:AbstractRay, I, T}
-    dest = Array{Tuple{Float32, Int32, T}}(undef, size(rays))
-    next_hit!(dest, rays, n_tris)
-    return dest
-end
-
-function next_hit!(dest :: Array{Tuple{Float32, Int32, T}}, rays, n_tris:: AbstractArray{Tuple{I, T}}) where {I, T}
-    @simd for i in 1:length(dest)
-        dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i]), n_tris, init=(Inf32, typemax(Int32), zero(T)))
+function get_hit(i_B::Tuple{Int32,BVBox}, ray::AbstractRay; kwargs...)
+    # https://tavianator.com/2022/ray_box_boundary.html
+    # WARNING - does not return distance to hit, just whether or not a hit exists!
+    i, B = i_B
+    
+    t_min = 0.0f0
+    t_max = Inf32
+    
+    for dim in 1:3
+        t1 = (B.min[dim] - ray.pos[dim]) / ray.dir[dim]
+        t2 = (B.max[dim] - ray.pos[dim]) / ray.dir[dim]
+        t_min = max(t_min, min(t1, t2))
+        t_max = min(t_max, max(t1, t2))
     end
-    return nothing
-end
-
-
-function next_hit(rays :: AbstractArray{ADRay}, n_tris :: AbstractArray{Tuple{I, T}}, override) where {I, T}
-    dest = Array{Tuple{Tuple{Float32, Float32}, Int32, T}}(undef, size(rays))
-    next_hit!(dest, rays, n_tris, override)
-    return dest
-end
-
-function next_hit!(dest :: Array{Tuple{Tuple{Float32, Float32}, Int32, T}}, rays, n_tris:: AbstractArray{Tuple{I, T}}, override=false) where {I, T}
-    for i in 1:length(dest)
-        if !rays[i].retired || override
-            dest[i] = minimum(n_tri -> get_hit(n_tri, rays[i]), n_tris, init=((Inf32, Inf32), typemax(Int32), zero(T)))
-        else
-            dest[i] = ((Inf32, Inf32), typemax(Int32), zero(T))
-        end
+    
+    if t_min < t_max
+        return (1.0f0, i, B)
+    else
+        return (Inf32, one(Int32), B)
     end
-    return nothing
 end
 
 ## Ray evolvers
 
-function evolve_ray(r::Ray, d_n_t, rndm)::Ray
-    d, n, t = d_n_t
-    if isinf(d)
-        return r
-    end
-    p = r.pos + r.dir * d
 
-    n1, n2 = 1.0f0, glass(r.λ)
-    if r.in_medium
-        n2, n1 = n1, n2
-    end
-    N = optical_normal(t, p)
 
-    s_polarization = project(r.polarization, N)
-    p_polarization = r.polarization - s_polarization
-
-    if can_refract(r.dir, N, n1, n2)
-        # if we can reflect, scale probability between two polarizations
-        # NB T_p + R_p + T_s + T_p = 2
-        r_s = reflectance_s(r.dir, N, n1, n2)
-        r_p = reflectance_p(r.dir, N, n1, n2)
-        if rndm <= (1 - r_s) / 2.0f0
-            s_polarization = normalize(s_polarization)
-            return Ray(
-                p,
-                refract(r.dir, N, n1, n2),
-                s_polarization,
-                !r.in_medium,
-                n,
-                r.dest,
-                r.λ,
-            )
-        elseif rndm <= (2 - r_s - r_p) / 2.0f0
-            p_polarization = normalize(p_polarization)
-            return Ray(
-                p,
-                refract(r.dir, N, n1, n2),
-                p_polarization,
-                !r.in_medium,
-                n,
-                r.dest,
-                r.λ,
-            )
-        end
-    end
-    # NB this guard clause setup allows us to reflect if it is necessary (transmission = 0)
-    # or if it was simply selected probabalistically.
-    reflected_direction = reflect(r.dir, N)
-    reflected_polarization = normalize(cross(reflected_direction, p_polarization))
-    return Ray(p, reflected_direction, reflected_polarization, r.in_medium, n, r.dest, r.λ)
-
+function next_p(r :: ADRay, t :: Float32, ∂t∂λ :: Float32, ∂t∂x :: Float32, ∂t∂y :: Float32, λ::N1, x::N2, y::N3) where {N1, N2, N3}
+    p_expansion(r, λ, x, y) +
+    d_expansion(r, λ, x, y) *
+    (t +
+    ∂t∂λ * (λ - r.λ) +
+    ∂t∂x * (x - r.x) +
+    ∂t∂y * (y - r.y)) # times constant + linear distance
 end
 
-function p(r, d, d′, λ::N) where N
-    r.pos + # origin constant
-    r.pos′ * (λ - r.λ) +  #origin linear
-    (r.dir + # direction constant
-    r.dir′ * (λ - r.λ)) * # ... plus direction linear
-    (d + d′ * (λ - r.λ)) # times constant + linear distance
-end
-
-function handle_optics(r, d, d′, n, N, n1 :: N1, n2::N2, rndm) where {N1, N2}
-    refracts = can_refract(r.dir, N(r.λ), n1(r.λ), n2(r.λ)) && rndm > reflectance(r.dir, N(r.λ), n1(r.λ), n2(r.λ))
+function handle_optics(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, i, N, n1::F1, n2::F2, rndm) where {F1,F2}
+    refracts =
+        can_refract(r.dir, N(r.λ, r.x, r.y), n1(r.λ), n2(r.λ)) &&
+        rndm > reflectance(r.dir, N(r.λ, r.x, r.y), n1(r.λ), n2(r.λ))
 
     if refracts
-        return ADRay(p(r, d, d′, r.λ),
-                     ForwardDiff.derivative(λ->p(r, d, d′, λ), r.λ),
-                     refract(r.dir, N(r.λ), n1(r.λ), n2(r.λ)),
-                     ForwardDiff.derivative(λ -> refract(r.dir + r.dir′ * (λ - r.λ), N(r.λ), n1(λ), n2(λ)), r.λ),
-                     !r.in_medium, n, r.dest, r.λ, false)
+        return ADRay(
+            next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, r.λ, r.x, r.y),
+            ForwardDiff.derivative(λ -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, λ, r.x, r.y), r.λ),
+            ForwardDiff.derivative(x -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, r.λ, x, r.y), r.x),
+            ForwardDiff.derivative(y -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, r.λ, r.x, y), r.y),
+            refract(r.dir, N(r.λ, r.x, r.y), n1(r.λ), n2(r.λ)),
+            ForwardDiff.derivative(
+                λ -> refract(d_expansion(r, λ, r.x, r.y), N(r.λ, r.x, r.y), n1(λ), n2(λ)),
+                r.λ,
+            ),
+            ForwardDiff.derivative(
+                x -> refract(d_expansion(r, r.λ, x, r.y), N(r.λ, x, r.y), n1(r.λ), n2(r.λ)),
+                r.x,
+            ),
+            ForwardDiff.derivative(
+                y -> refract(d_expansion(r, r.λ, r.x, y), N(r.λ, r.x, y), n1(r.λ), n2(r.λ)),
+                r.x,
+            ),
+            !r.in_medium,
+            i,
+            r.dest,
+            r.λ,
+            r.x,
+            r.y,
+            RAY_STATUS_ACTIVE,
+        )
 
     else
-        return ADRay(p(r, d, d′, r.λ),
-                     ForwardDiff.derivative(λ->p(r, d, d′, λ), r.λ),
-                     reflect(r.dir, N(r.λ)),
-                     ForwardDiff.derivative(λ -> reflect(r.dir + r.dir′ * (λ - r.λ), N(λ)), r.λ),
-                     r.in_medium, n, r.dest, r.λ, false)
+        return ADRay(
+            next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, r.λ, r.x, r.y),
+            ForwardDiff.derivative(λ -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, λ, r.x, r.y), r.λ),
+            ForwardDiff.derivative(x -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, r.λ, x, r.y), r.x),
+            ForwardDiff.derivative(y -> next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, r.λ, r.x, y), r.y),
+            reflect(r.dir, N(r.λ, r.x, r.y)),
+            ForwardDiff.derivative(
+                λ -> reflect(d_expansion(r, λ, r.x, r.y), N(λ, r.x, r.y)),
+                r.λ,
+            ),
+            ForwardDiff.derivative(
+                x -> reflect(d_expansion(r, r.λ, x, r.y), N(r.λ, x, r.y)),
+                r.x,
+            ),
+            ForwardDiff.derivative(
+                y -> reflect(d_expansion(r, r.λ, r.x, y), N(r.λ, r.x, y)),
+                r.x,
+            ),
+            r.in_medium,
+            i,
+            r.dest,
+            r.λ,
+            r.x,
+            r.y,
+            RAY_STATUS_ACTIVE,
+        )
     end
 end
 
-function evolve_ray(r::ADRay, d_n_t :: Tuple{Tuple{R, R}, I, T}, rndm)::ADRay where {R<:Real, I<:Integer, T}
-    (d, d′), n, t = d_n_t
-    if isinf(d)
+function evolve_ray(r::ADRay, i, T, rndm, first_diffuse_index)::ADRay
+    if r.status != RAY_STATUS_ACTIVE
         return r
     end
+    (t, ∂t∂λ, ∂t∂x, ∂t∂y), i, T = get_hit((i, T), r)
+    if i >= first_diffuse_index
+        # compute the position in the new triangle, set dir to zero
+        return retire(r, RAY_STATUS_DIFFUSE)
+    end
+    if isinf(t)
+        return retire(r, RAY_STATUS_INFINITY)
+    end
 
-
-    N(λ) = optical_normal(t, p(r, d, d′, λ))
+    N(λ, x, y) = optical_normal(T, next_p(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, λ, x, y))
+    # TODO: replace glass/air with expansion terms
     if r.in_medium
-        return handle_optics(r, d, d′, n, N, glass, air, rndm)
+        return handle_optics(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, i, N, glass, air, rndm)
     else
-        return handle_optics(r, d, d′, n, N, air, glass, rndm)
+        return handle_optics(r, t, ∂t∂λ, ∂t∂x, ∂t∂y, i, N, air, glass, rndm)
     end
 end
-
 
 ## Wrap it all up
 
-function ad_frame_matrix(
-    camera_generator::Function,
-    width::Int,
-    height::Int,
-    tris,
-    skys,#::AbstractArray{Function},
-    dλ,
+function run_evolution!(
+    hitter::AbstractHitter,
+    tracer::StableTracer;
     depth,
-    ITERS,
-    phi,
-    random,
-    A, # type: either Array or CuArray
-)
-    camera = camera_generator(1, 1)
-    R = [A(zeros(Float32, height, width)) for s in skys]
-    G = [A(zeros(Float32, height, width)) for s in skys]
-    B = [A(zeros(Float32, height, width)) for s in skys]
-    #out .= RGBf(0, 0, 0)
-    λ_min = 400.0f0
-    λ_max = 700.0f0
-    intensity = Float32(1 / ITERS) * 2
+    first_diffuse,
+    n_tris,
+    tris,
+    rays,
+    force_rand=nothing,
+    kwargs...,
+) where {T}
+    for iter = 1:depth
+        next_hit!(tracer, hitter, rays, n_tris)
+        # evolve rays optically
+        rand!(tracer.rndm)
+        if !isnothing(force_rand)
+            tracer.rndm .= force_rand
+        end
 
-    function init_ray(x, y, λ, dv)::AbstractRay
-        _x, _y = x - width / 2, y - height / 2
-        scale = width * _COS_45 / camera.FOV_half_sin
-        _x /= scale
-        _y /= scale
-
-        _z = sqrt(1 - _x^2 - _y^2)
-        dir =
-            _x * camera.right +
-            _y * camera.up +
-            _z * camera.dir +
-            dv * 0.25f0 / max(width, height)
-        dir = normalize(dir)
-        idx = (x - 1) * height + y
-        polarization = normalize(cross(camera.up, dir))
-        return ADRay(camera.pos, zero(V3), dir, zero(V3), false, 0, idx, λ, false)
+        # NOTE: this triggers a D2H memcpy & gap in compute usage
+        tri_view = @view tris[tracer.hit_idx]
+        # everything has to be a view of the same size to avoid allocs + be sort safe
+        rays .= evolve_ray.(rays, tracer.hit_idx, tri_view, tracer.rndm, first_diffuse)
     end
-
-    I = map(Int32, collect(1:length(tris)))
-    n_tris = collect(zip(I, tris)) |> A |> m -> reshape(m, 1, length(m)) |> A
-
-    row_indices = A(1:width)
-    col_indices = reshape(A(1:height), 1, height)
-    has_run = false
-    rays = nothing
-    hits = nothing
-    grid = nothing
-    rndm = nothing
-    dv = nothing
-    I = nothing
-    s0 = nothing
-    #@showprogress for (iter, λ) in [(iter, λ) for iter = 1:ITERS for λ = λ_min:dλ:λ_max]
-    for iter = 1:ITERS
-
-        if has_run
-            dv .=
-                V3.(
-                    random(Float32, width),
-                    random(Float32, width),
-                    random(Float32, width),
-                )
-            rays .= reshape(init_ray.(row_indices, col_indices, 550.0, dv), width * height)
-        else
-            rndm = random(Float32, width * height)
-            dv =
-                V3.(
-                    random(Float32, width),
-                    random(Float32, width),
-                    random(Float32, width),
-                )
-            rays = reshape(init_ray.(row_indices, col_indices, 550.0, dv), width * height)
-        end
-
-        rndm .= random(Float32, length(rays))
-        if has_run
-            next_hit!(hits, rays, n_tris, false)
-        else
-            hits = next_hit(rays, n_tris, true)
-        end
-        #
-        for iter = 2:depth
-            rndm .= random(Float32, length(rays))
-            #map!(d_r -> d_r[2], rays, hits)
-            map!(evolve_ray, rays, rays, hits, rndm)
-            next_hit!(hits, rays, n_tris, false)
-        end
-        rndm .= random(Float32, width * height)
-        map!(evolve_ray, rays, rays, hits, rndm)
-
-
-
-
-        for λ in λ_min:dλ:λ_max
-            r0, g0, b0 = retina_red(λ), retina_green(λ), retina_blue(λ)
-            for (i, sky) in enumerate(skys)
-
-                g = r -> r.in_medium ? 0.0f0 : sky(r.dir + r.dir′ * (λ - r.λ), λ, phi)
-
-                if isnothing(I)
-                    I = map(r->r.dest, rays)
-                else
-                    map!(r->r.dest, I, rays)
-                end
-
-                if isnothing(s0)
-                    s0 = g.(rays)
-                else
-                    map!(g, s0, rays)
-                end
-
-                R[i][I] .+= intensity * s0 * r0 * dλ
-                G[i][I] .+= intensity * s0 * g0 * dλ
-                B[i][I] .+= intensity * s0 * b0 * dλ
-            end
-        end
-
-        has_run = true
-    end
-
-    out = Dict()
-    for s in keys(skys)
-        _R, _G, _B = map(Array, (R[s], G[s], B[s]))
-        img = Array{RGBf}(undef, size(_R)...)
-        @simd for i = 1:length(img)
-            if isnan(_R[i]) || isnan(_G[i]) || isnan(_B[i])
-                img[i] = RGBf(1.0f0, 0.0f0, 0.0f0)
-            else
-                r, g, b = clamp(_R[i], 0, 1), clamp(_G[i], 0, 1), clamp(_B[i], 0, 1)
-                img[i] = RGBf(r, g, b)
-            end
-        end
-        out[s] = img
-    end
-    return out
+    return
 end
 
 
-
-function frame_matrix(
-    camera_generator::Function,
-    width::Int,
-    height::Int,
-    tris,
-    skys,
-    dλ,
+function run_evolution!(
+    hitter::AbstractHitter,
+    tracer::ExperimentalTracer;
     depth,
-    ITERS,
-    phi,
-    random,
-    A, # type: either Array or CuArray
-)
-    camera = camera_generator(1, 1)
-    R = [zeros(Float32, height, width) for s in skys]
-    G = [zeros(Float32, height, width) for s in skys]
-    B = [zeros(Float32, height, width) for s in skys]
-    #out .= RGBf(0, 0, 0)
-    λ_min = 400.0f0
-    λ_max = 700.0f0
-    intensity = Float32(1 / ITERS) * 2
+    first_diffuse,
+    n_tris,
+    tris,
+    rays,
+    reorder=false,
+    force_rand=nothing,
+    kwargs...,
+) where {T}
+    cap = length(rays)
+    ray_view = @view rays[1:cap]
+    for iter = 1:depth
+        if cap == 0
+            break
+        end
+        ray_view = @view rays[1:cap]
 
-    function init_ray(x, y, λ, dv)::AbstractRay
-        _x, _y = x - width / 2, y - height / 2
-        scale = width * _COS_45 / camera.FOV_half_sin
-        _x /= scale
-        _y /= scale
+        next_hit!(tracer, hitter, ray_view, n_tris)
+        # evolve rays optically
+        rand!(tracer.rndm)
+        if !isnothing(force_rand)
+            tracer.rndm .= force_rand
+        end
+        tri_view = @view tris[tracer.hit_idx]
+        # everything has to be a view of the same size to avoid allocs + be sort safe
+        rays .= evolve_ray.(rays, tracer.hit_idx, tri_view, tracer.rndm, first_diffuse)
 
-        _z = sqrt(1 - _x^2 - _y^2)
-        dir =
-            _x * camera.right +
-            _y * camera.up +
-            _z * camera.dir +
-            dv * 0.25f0 / max(width, height)
-        dir = normalize(dir)
-        idx = (x - 1) * height + y
-        polarization = normalize(cross(camera.up, dir))
-        return Ray(camera.pos, dir, polarization, false, 0, idx, λ)
+        cap = partition!(rays, tracer.ray_swap; by=(ignore_arg, r)->r.status!=RAY_STATUS_ACTIVE)
+        if cap % 512 != 0
+            # TODO - I think this lazy math is inefficient
+            cap = min(length(rays), ((cap ÷ 512) + 1) * 512)
+        end
     end
 
-    I = map(Int32, collect(1:length(tris)))
-    n_tris = collect(zip(I, tris)) |> A |> m -> reshape(m, 1, length(m))
-
-    row_indices = A(1:width)
-    col_indices = reshape(A(1:height), 1, height)
-    has_run = false
-    rays = nothing
-    hits = nothing
-    grid = nothing
-    rndm = nothing
-    host_rays = nothing
-    dv = nothing
-    I = nothing
-    s0 = nothing
-    @showprogress for (iter, λ) in [(iter, λ) for iter = 1:ITERS for λ = λ_min:dλ:λ_max]
-
-        if has_run
-            dv .=
-                V3.(
-                    random(Float32, width),
-                    random(Float32, width),
-                    random(Float32, width),
-                )
-            rays .= reshape(init_ray.(row_indices, col_indices, λ, dv), width * height)
-        else
-            rndm = random(Float32, width * height)
-            dv =
-                V3.(
-                    random(Float32, width),
-                    random(Float32, width),
-                    random(Float32, width),
-                )
-            rays = reshape(init_ray.(row_indices, col_indices, λ, dv), width * height)
-        end
-
-        rndm .= random(Float32, width * height)
-        if has_run
-            next_hit!(hits, rays, n_tris)
-        else
-            hits = next_hit(rays, n_tris)#minimum(Broadcast.broadcasted(get_hit, n_tris, rays), dims=2, init=(Inf32, typemax(Int32), zero(STri)))
-        end
-        #
-        for iter = 2:depth
-            rndm .= random(Float32, width * height)
-            #map!(d_r -> d_r[2], rays, hits)
-            map!(evolve_ray, rays, rays, hits, rndm)
-            hits = next_hit(rays, n_tris)#hits = minimum(Broadcast.broadcasted(get_hit, n_tris, rays), dims=2, init=(Inf32, typemax(Int32), zero(STri)))
-        end
-        rndm .= random(Float32, width * height)
-        map!(evolve_ray, rays, rays, hits, rndm)
-
-        if has_run
-            copyto!(host_rays, rays)
-        else
-            host_rays = Array(rays)
-        end
-
-        r0, g0, b0 = retina_red(λ), retina_green(λ), retina_blue(λ)
-        for (i, sky) in enumerate(skys)
-
-            g = r -> sky(r.dir, λ, phi)
-
-            if isnothing(I)
-                I = map(r->r.dest, host_rays)
-            else
-                map!(r->r.dest, I, host_rays)
-            end
-
-            if isnothing(s0)
-                s0 = g.(host_rays)
-            else
-                map!(g, s0, host_rays)
-            end
-
-            R[i][I] .+= intensity * s0 * r0 * dλ
-            G[i][I] .+= intensity * s0 * g0 * dλ
-            B[i][I] .+= intensity * s0 * b0 * dλ
-        end
-
-
-        has_run = true
-
+    if reorder
+        indices = map(r->r.dest, rays)
+        # `copy!` is faster but causes nvvprof to fail on windows
+        copy!(tracer.ray_swap, rays)
+        #tracer.ray_swap .= rays
+        dest_view = @view rays[indices]
+        copy!(dest_view, tracer.ray_swap)
+        #dest_view .= tracer.ray_swap
     end
+    # needed to realign hit_idx
+    next_hit!(tracer, hitter, rays, n_tris)
+    return
+end
 
-    out = Dict()
-    for s in keys(skys)
-        _R, _G, _B = R[s], G[s], B[s]
-        img = Array{RGBf}(undef, size(_R)...)
-        @simd for i = 1:length(img)
-            if isnan(_R[i]) || isnan(_G[i]) || isnan(_B[i])
-                img[i] = RGBf(1.0f0, 0.0f0, 0.0f0)
+function trace!(
+    tracer_type::Type{T},
+    imager_type::Type{I};
+    forward_hitter,
+    backward_hitter,
+    cam,
+    lights,
+    forward_upscale,
+    backward_upscale,
+    tex_f,
+    tris,
+    λ_min,
+    dλ,
+    λ_max,
+    width,
+    height,
+    depth,
+    first_diffuse,
+    force_rand=nothing, # 0 to force reflection, 1 to force refraction
+    intensity=1.0f0,
+    iterations_per_frame=1,   
+) where {T<:AbstractTracer,
+         H<:AbstractHitter,
+         I<:AbstractImager}
+    out = nothing
+    
+    for frame_iter in 1:iterations_per_frame
+        tex = tex_f()
+        n_tris = tuple.(Int32(1):Int32(length(tris)), map(tri_from_ftri, tris)) |> m -> reshape(m, 1, length(m))
+        
+        spectrum, retina_factor = _spectrum_datastructs(CuArray, λ_min:dλ:λ_max)
+        # initialize rays for forward tracing
+       tex_task = @async begin 
+            let
+        rays = rays_from_lights(lights, forward_upscale)
+        
+        
+        tracer = T(CuArray, rays, forward_upscale)
+
+
+        basic_params = Dict{Symbol,Any}()
+        @pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, intensity, force_rand
+       
+
+        array_kwargs = Dict{Symbol,Any}()
+        @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor
+
+        array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
+        run_evolution!(
+            forward_hitter,
+            tracer;
+            basic_params...,
+            array_kwargs...,
+        )
+        continuum_light_map2!(; tracer = tracer, basic_params..., array_kwargs...)
+        end
+        tex = CuTexture(CuTextureArray(tex); interpolation=CUDA.LinearInterpolation())
+    end
+        # this is slowish for real time loop
+ #       tex_task = @async 
+        let
+            # reverse trace image
+            RGB3 = CuArray{Float32}(undef, width * height, 3)
+            RGB3 .= 0
+            RGB = CuArray{RGBf}(undef, width * height)
+
+            ray_generator(x, y, λ, dv) = camera_ray(cam, height ÷ backward_upscale, width ÷ backward_upscale, x, y, λ, dv)
+            rays = wrap_ray_gen(ray_generator, height ÷ backward_upscale, width ÷ backward_upscale)
+
+            tracer = T(CuArray, rays, backward_upscale)
+
+            basic_params = Dict{Symbol,Any}()
+            @pack! basic_params = width, height, dλ, λ_min, λ_max, depth, first_diffuse, intensity, force_rand
+            
+            array_kwargs = Dict{Symbol,Any}()
+
+            @pack! array_kwargs = tris, n_tris, rays, spectrum, retina_factor, RGB3, RGB, rays
+            array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
+
+            NVTX.@range "evolver" begin CUDA.@sync begin run_evolution!(
+                backward_hitter,
+                tracer;
+                reorder=true,
+                basic_params...,
+                array_kwargs...,
+            ) end end
+
+            wait(tex_task)
+                
+            NVTX.@range "shady" begin CUDA.@sync begin continuum_shade!(I(); tracer = tracer, tex=tex, basic_params..., array_kwargs...) end end
+            #@async unsafe_destroy!(tex)
+            @unpack RGB = array_kwargs
+            if frame_iter == 1
+                out = RGB
             else
-                r, g, b = clamp(_R[i], 0, 1), clamp(_G[i], 0, 1), clamp(_B[i], 0, 1)
-                img[i] = RGBf(r, g, b)
+                out .= out .* (frame_iter - 1) / frame_iter + RGB ./ frame_iter
             end
         end
-        out[s] = img
     end
     return out
 end

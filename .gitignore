@@ -1,2 +1,5 @@
 *.png
 *.mov
+*.hdr
+/objs
+*.mp4
