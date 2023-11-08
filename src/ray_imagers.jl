@@ -387,6 +387,7 @@ function shade_tex4_kernel(
     Λ,
     tex::AbstractArray{Float32},
     retina_factor,
+    skydome::AbstractArray{Float32},
     intensity
 ) where {AbstractT}
     @inbounds begin
@@ -401,12 +402,24 @@ function shade_tex4_kernel(
     # NB disregards in_medium
     # evolve to hit a diffuse surface
     thread_out = zero(RGBf)
-    if adr.status == RAY_STATUS_INFINITY
-        x = (normalize(adr.dir)[2] * 0.5f0 + 0.5f0) * 0.2f0
-        if isnan(x)
-            x = 0.0f0
-        end
-        thread_out = RGBf(x,x,x)
+    @fastmath if adr.status == RAY_STATUS_INFINITY
+        ray = expand(adr, adr.λ, adr.x + δx[threadIdx().y], adr.y + δy[threadIdx().z])
+        θ = acos(ray.dir[3])
+        ϕ = atan(ray.dir[2], ray.dir[1])
+        v = ((ϕ  / pi) + 1) * 0.5f0
+        u = θ / pi# * 3 - 1 # factor of 3 is super baffling but kinda seems necessary
+        
+        u *= size(skydome)[1]
+        v *= size(skydome)[2]
+
+        #x = (normalize(adr.dir)[2] * 0.5f0 + 0.5f0) * 0.2f0
+        #if isnan(x)
+        #    x = 0.0f0
+        #end
+        r = skydome[u, v, 1.0f0]
+        g = skydome[u, v, 2.0f0]
+        b = skydome[u, v, 3.0f0]
+        thread_out = RGBf(r, g, b)
     end
     if adr.status == RAY_STATUS_DIFFUSE
         for i_λ in eachindex(Λ)
@@ -452,6 +465,7 @@ function continuum_shade!(imager::ExperimentalImager2;
     tex,
     width,
     height,
+    skydome,
     intensity=1.0f0,
     kwargs...,
 )
@@ -475,7 +489,7 @@ function continuum_shade!(imager::ExperimentalImager2;
     
     tuple_ret = Tuple(Tuple(retina_factor[1, i, :]) for i in 1:3)
 
-    args = upres_rgb, rays, tri_view, δx, δy, spectrum, tex, retina_factor, intensity
+    args = upres_rgb, rays, tri_view, δx, δy, spectrum, tex, retina_factor, skydome, intensity
     kernel = @cuda launch=false shade_tex4_kernel(args...)
     kernel(args...; threads=(rays_per_block, length(δx), length(δy)), blocks=(R ÷ rays_per_block))
     #s(args...) = shade_tex3(args..., spectrum, tex, retina_factor)

@@ -12,12 +12,12 @@ let
     end
 
     cam = my_moving_camera()
-    ray_generator(x, y, λ, dv) = camera_ray(cam, 512, 512, x, y, λ, zero(ℜ³))
+    ray_generator(x, y, λ, dv) = camera_ray(cam, 512, 512, x, y, λ, dv)
     rays = wrap_ray_gen(ray_generator, 512, 512)
     rays = rays#[1:length(rays) - rand(1:31)]
-    index_view = CuArray(shuffle(1:length(rays)))#[1:length(rays)-rand(1:32)])
+    index_view = CuArray((1:length(rays))[1:length(rays)-rand(1:32)])
    # @info index_view
-    tris = mesh_to_FTri(load("C:/Users/ellis/Documents/Github/mcabbot/SHART/objs/artemis_smaller.obj"))
+    tris = mesh_to_FTri(load("C:/Users/sandy/Documents/Github/WWRTRT/objs/artemis_smaller.obj"))
     center = tris |> centroidish
     centers, members = nothing, nothing
     try
@@ -31,19 +31,17 @@ let
     end
     #N_rays = 256^2
     #rays = FastRay.(Ref(center), normalize.(CUDA.rand(ℜ³, N_rays) .- CUDA.rand(ℜ³, N_rays)), 1)    
-    n_tris = tuple.(Int32(1):Int32(length(tris)), map(tri_from_ftri, tris)) |> m -> reshape(m, 1, length(m)) |> CuArray
-    tracer = StableTracer(CuArray, rays, 1)
-    hitter = DPBVHitter(CuArray, length(rays), tris, centers, members)
-    #hitter = BoundingVolumeHitter(CuArray, rays, centers, members, 4)
-    next_hit!(tracer, hitter, rays, n_tris)
-    @benchmark begin CUDA.@sync next_hit!($tracer, $hitter, $rays, $n_tris) end evals=1 samples=20 seconds=11
-
-    #hitter = ExperimentalHitter4(CuArray, rays)
-    #next_hit!(tracer, hitter, rays, index_view, n_tris)
-    #@benchmark begin CUDA.@sync next_hit!($tracer, $hitter, $rays, $index_view, $n_tris) end evals=1 samples=20 seconds=15
     
+    #hitter = BoundingVolumeHitter(CuArray, rays, centers, members, 2)
+    hitter = ExperimentalHitter4(CuArray, rays)
+    tracer = StableTracer(CuArray, rays, 1)
+    n_tris = tuple.(Int32(1):Int32(length(tris)), map(tri_from_ftri, tris)) |> m -> reshape(m, 1, length(m)) |> CuArray
+    next_hit!(tracer, hitter, rays, index_view, n_tris)
+    #next_hit!(tracer, hitter, rays, n_tris)
+    
+    @benchmark begin CUDA.@sync next_hit!($tracer, $hitter, $rays, $index_view, $n_tris) end evals=1 samples=20 seconds=15
     #for iter in 1:4
     #    CUDA.NVTX.@range "iter $iter" next_hit!(tracer, hitter, rays, n_tris)
     #end
-    #tracer.hit_idx |> Array |> join |> SHA.sha256 |> bytes2hex |> println
+    
 end

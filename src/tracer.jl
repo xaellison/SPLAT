@@ -11,7 +11,7 @@ include("bv.jl")
 using ForwardDiff
 using Makie
 using Serialization
-
+using NVTX
 import Random.rand!
 
 ## get_hit methods - how to intersect rays with geometric elements
@@ -299,6 +299,7 @@ function trace!(
     height,
     depth,
     first_diffuse,
+    skydome,
     force_rand=nothing, # 0 to force reflection, 1 to force refraction
     intensity=1.0f0,
     iterations_per_frame=1,   
@@ -327,8 +328,10 @@ function trace!(
 
         array_kwargs = Dict{Symbol,Any}()
         @pack! array_kwargs = tex, tris, n_tris, rays, spectrum, retina_factor
-
-        array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
+        # works around sneaky bug: from CUDA 4.0.1 -> 4.1.0, CuArray stopped being idempotent, meaning the tex written to
+        # by continuum_light_map2! was not the one used by the backwards renderer
+        safe_cudafy(x) = isa(x, AnyCuArray) ? x : CuArray(x)
+        array_kwargs = Dict(kv[1] => safe_cudafy(kv[2]) for kv in array_kwargs)
         run_evolution!(
             forward_hitter,
             tracer;
@@ -358,7 +361,8 @@ function trace!(
             array_kwargs = Dict{Symbol,Any}()
 
             @pack! array_kwargs = tris, n_tris, rays, spectrum, retina_factor, RGB3, RGB, rays
-            array_kwargs = Dict(kv[1] => CuArray(kv[2]) for kv in array_kwargs)
+            safe_cudafy(x) = isa(x, AnyCuArray) ? x : CuArray(x)
+            array_kwargs = Dict(kv[1] => safe_cudafy(kv[2]) for kv in array_kwargs)
 
             NVTX.@range "evolver" begin CUDA.@sync begin run_evolution!(
                 backward_hitter,
@@ -370,7 +374,7 @@ function trace!(
 
             wait(tex_task)
                 
-            NVTX.@range "shady" begin CUDA.@sync begin continuum_shade!(I(); tracer = tracer, tex=tex, basic_params..., array_kwargs...) end end
+            NVTX.@range "shady" begin CUDA.@sync begin continuum_shade!(I(); tracer = tracer, tex=tex, skydome=skydome, basic_params..., array_kwargs...) end end
             #@async unsafe_destroy!(tex)
             @unpack RGB = array_kwargs
             if frame_iter == 1
