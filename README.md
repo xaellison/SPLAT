@@ -17,21 +17,24 @@ In the following examples we see direct light sources cast shadows and caustics 
 ### Gorgeous but not real time
 
 Here's a scene...
-![Artemis GIF](out/019.png)
-
-... frozen for detail
 
 ![Artemis static](out/boomerang.gif)
 
+... frozen for detail
+
+![Artemis GIF](out/019.png)
 ### Real Time
 
+Simpler scenes under 10k triangles can run on "low" settings at 20-30 FPS, 1 Megapixel per frame.
+
+![Sphere](out/scaled_1.png)
 
 
 ## Project Status and Goals
 
 This is a hobby project of three stages
-1. "Can I use Julia's AD functionality to implement photon splatting on GPUs?" Yep, next
-2. "This actually might be able to run in real time. How far can I take this?" Probably further than I should've.
+1. "Can I use Julia's AD functionality to implement photon splatting on GPUs?" _Yep, next_
+2. "This actually might be able to run in real time. How far can I take this?" _Probably further than I should've._
 3. TODO: I would like to clean this up from my hobby blob and make it a package that can downloaded and tinkered with. As a person with a full time job, this has proven elusive so far.
  
 
